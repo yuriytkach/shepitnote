@@ -68,6 +68,12 @@ the device the call audio plays out of, then run:
 AUDIO_SOURCE_TYPE=dual ./hushnote full -d 10 -m tiny -o mistral:7b
 ```
 
+> **Tip: use a headset for the cleanest separation.** On open laptop speakers
+> the microphone also picks up the remote audio playing aloud, so your **You**
+> track carries a faint echo of the **Remote** side. It's harmless, but Whisper
+> may transcribe that echo as extra `[You]` text. A headset (nothing plays out
+> loud) keeps the two tracks cleanly separated.
+
 For Bluetooth headsets in HSP/HFP mode, ffmpeg's PulseAudio capture can be
 silent; use the PipeWire backend instead:
 
