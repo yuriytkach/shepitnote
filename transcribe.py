@@ -19,9 +19,10 @@ if _CUDA_LIBS and _CUDA_LIBS not in os.environ.get("LD_LIBRARY_PATH", ""):
 try:
     from faster_whisper import WhisperModel
 except ImportError:
-    print("Error: faster-whisper not installed", file=sys.stderr)
-    print("Install with: pip install faster-whisper", file=sys.stderr)
-    sys.exit(1)
+    # Deferred so the module stays importable (e.g. for unit tests / helper
+    # reuse) even when faster-whisper is not installed. The CLI still errors
+    # clearly at model-load time (see _load_model).
+    WhisperModel = None
 
 
 def _unload_ollama():
@@ -47,9 +48,29 @@ def _unload_ollama():
         pass
 
 
+def _normalize_language(language):
+    """Normalize a language code to a faster-whisper value or None (auto-detect).
+
+    None, empty/whitespace-only, and "auto" (case-insensitive) all mean
+    auto-detect and collapse to None, so no language is passed to
+    faster-whisper. Any other code is returned stripped and lowercased
+    (uk, ru, en, nl, ...) — faster-whisper codes are lowercase ISO codes, so
+    this makes -l EN / WHISPER_LANGUAGE=UK just work — letting faster-whisper
+    validate it and raise a clear error on a genuine typo.
+    """
+    if language is None:
+        return None
+    language = language.strip()
+    if not language:
+        return None
+    if language.lower() == "auto":
+        return None
+    return language.lower()
+
+
 def transcribe_audio(
     audio_file: str,
-    model_size: str = "base",
+    model_size: str = "large-v3",
     device: str = "auto",
     language: str = None,
     output_format: str = "txt"
@@ -67,6 +88,18 @@ def transcribe_audio(
     Returns:
         dict with transcription results
     """
+    # Fail fast on the missing hard dependency, before any side effects
+    # (e.g. _unload_ollama stopping the user's running model).
+    if WhisperModel is None:
+        print("Error: faster-whisper not installed", file=sys.stderr)
+        print("Install with: pip install faster-whisper", file=sys.stderr)
+        sys.exit(1)
+
+    # Collapse None/empty/"auto" (case-insensitive) to auto-detect. This is the
+    # single choke point every transcription path funnels through, so no
+    # bash-side "auto" handling is needed.
+    language = _normalize_language(language)
+
     if os.environ.get("UNLOAD_OLLAMA") == "1":
         _unload_ollama()
 
@@ -101,7 +134,7 @@ def transcribe_audio(
         model = _load_model(device, compute_type)
     except RuntimeError as e:
         if "out of memory" in str(e).lower() or "CUDA" in str(e):
-            print("GPU OOM during model load, falling back to CPU", file=sys.stderr)
+            print("GPU unavailable or out of memory during model load, using CPU", file=sys.stderr)
             device = "cpu"
             model = _load_model("cpu", "int8")
         else:
@@ -112,7 +145,7 @@ def transcribe_audio(
         info, all_segments = _run_transcription(model)
     except RuntimeError as e:
         if "out of memory" in str(e).lower() or "CUDA" in str(e):
-            print("GPU OOM during transcription, falling back to CPU", file=sys.stderr)
+            print("GPU unavailable or out of memory during transcription, using CPU", file=sys.stderr)
             del model
             model = _load_model("cpu", "int8")
             info, all_segments = _run_transcription(model)
@@ -168,9 +201,9 @@ def save_transcription(result: dict, output_file: str, format: str):
 def main():
     parser = argparse.ArgumentParser(description="Transcribe audio using faster-whisper")
     parser.add_argument("audio_file", help="Path to audio file")
-    parser.add_argument("-m", "--model", default="base",
+    parser.add_argument("-m", "--model", default="large-v3",
                        choices=["tiny", "base", "small", "medium", "large-v3"],
-                       help="Whisper model size (default: base)")
+                       help="Whisper model size (default: large-v3)")
     parser.add_argument("-d", "--device", default="auto",
                        choices=["cpu", "cuda", "auto"],
                        help="Device to use (default: auto)")

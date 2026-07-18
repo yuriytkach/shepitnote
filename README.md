@@ -75,12 +75,70 @@ cp .hushnoterc.example .hushnoterc
 | Model | Size | Speed | Use Case |
 |-------|------|-------|----------|
 | `tiny` | 75 MB | ~10-20x realtime | Testing |
-| `base` | 150 MB | ~5-10x realtime | Balanced (default) |
+| `base` | 150 MB | ~5-10x realtime | Balanced |
 | `small` | 500 MB | ~2-5x realtime | Better accuracy |
 | `medium` | 1.5 GB | ~1-2x realtime | Professional |
-| `large-v3` | 3 GB | ~0.5-1x realtime | Maximum accuracy |
+| `large-v3` | 3 GB | ~0.5-1x realtime | Maximum accuracy (default) |
 
-Models download automatically on first use. Language is auto-detected by default.
+Models download automatically on first use. `large-v3` is the default because
+multilingual (Ukrainian/Russian/English) accuracy matters more here than speed;
+this project targets an AMD APU with no usable CUDA, so it runs on CPU at
+roughly real-time (~0.5-1x), materially slower than `base`. Override per run
+with `-m base` / `-m small` or set `WHISPER_MODEL=base` when speed matters.
+
+Language is auto-detected by default — but for Ukrainian/Russian/English
+meetings you usually want to set it explicitly; see
+[Language selection](#language-selection-ukrainian--russian--english) below.
+
+### Language selection (Ukrainian / Russian / English)
+
+faster-whisper's auto-detect samples only the **first ~30 seconds** of a file
+and picks **one language for the whole recording** — there is no mid-file
+switching, so code-switching is forced through that single chosen model. In
+practice **Ukrainian is frequently mislabeled as Russian** (the two are close),
+and when that happens the entire meeting is transcribed as Russian.
+
+For a known-language meeting, set the language explicitly rather than relying on
+auto-detect:
+
+```bash
+./hushnote full -l uk     # force Ukrainian
+./hushnote full -l ru     # force Russian
+./hushnote full -l en     # force English
+./hushnote full -l auto   # auto-detect (same as leaving it unset)
+```
+
+Set a permanent default in `.hushnoterc`:
+
+```bash
+WHISPER_LANGUAGE=uk       # or ru / en / auto (auto or empty = auto-detect)
+```
+
+`auto` (any case) and an empty value both mean auto-detect. Any other
+faster-whisper language code works too (`nl`, `de`, `fr`, ...); `uk`, `ru`,
+`en`, and `auto` are simply the recommended set for this project.
+
+`large-v3` (the default model) reduces uk/ru confusion and improves accented
+English, but does **not** eliminate mislabeling — for a meeting you know is in
+one language, an explicit `-l` is still the reliable choice.
+
+#### Measuring accuracy on your own recordings (user verification step)
+
+The uk/ru/en guidance above is **qualitative**. Whisper accuracy depends on your
+microphone, accents, and how much the speakers code-switch, so the right default
+for you can only be found on **your own audio** — it cannot be measured for you
+or in CI. To pick your defaults, take 2-3 representative clips of your meetings
+and compare, for each:
+
+```bash
+./hushnote transcribe clip.wav -l auto   # what auto-detect produces
+./hushnote transcribe clip.wav -l uk     # explicit language (uk/ru/en)
+```
+
+Check both transcripts against what was actually said. If `-l auto` sometimes
+labels Ukrainian audio as Russian while `-l uk` reads correctly, set
+`WHISPER_LANGUAGE=uk` as your default. Repeat with a Russian and an English clip
+to confirm the explicit codes behave for each.
 
 ## Usage
 
@@ -103,8 +161,8 @@ Commands:
 
 Options:
     -d, --duration SEC      Recording duration (default: manual stop with Ctrl+C)
-    -m, --model MODEL       Whisper model (tiny|base|small|medium|large-v3)
-    -l, --language LANG     Language code, e.g. nl, en (default: auto-detect)
+    -m, --model MODEL       Whisper model (tiny|base|small|medium|large-v3) (default: large-v3)
+    -l, --language LANG     Language code, e.g. uk, ru, en, or auto (default: auto-detect)
     -o, --ollama MODEL      Ollama model for summarization
     -f, --format FMT        Output format (txt|json|srt|vtt|md)
     -s, --speakers NUM      Number of speakers (for diarization)
@@ -228,7 +286,7 @@ pactl set-default-source YOUR_SOURCE_NAME
 ./record_audio.sh -d 5   # test with a 5-second recording
 ```
 
-**Wrong language detected:** faster-whisper samples the first 30 seconds for language detection. If your meeting starts with silence or a different language, set `WHISPER_LANGUAGE` in `.hushnoterc`.
+**Wrong language detected:** faster-whisper samples only the first 30 seconds and picks one language for the whole file. If your meeting starts with silence or a different language — or if Ukrainian audio comes out transcribed as Russian (a common mislabel) — set the language explicitly with `-l uk|ru|en` or `WHISPER_LANGUAGE` in `.hushnoterc`. See [Language selection](#language-selection-ukrainian--russian--english) for details.
 
 **Ollama not responding:**
 ```bash

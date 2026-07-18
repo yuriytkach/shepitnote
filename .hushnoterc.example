@@ -8,12 +8,19 @@
 
 # Whisper model size: tiny, base, small, medium, large-v3
 # Larger models are more accurate but slower and use more memory.
-# Default: base
-#WHISPER_MODEL=base
+# large-v3 gives the best multilingual (uk/ru/en) accuracy and reduces
+# Ukrainian-vs-Russian confusion, but is ~3GB and runs near real-time on CPU
+# (no usable GPU on this target). Override with base/small when speed matters.
+# Default: large-v3
+#WHISPER_MODEL=large-v3
 
-# Language code for transcription, e.g. nl, en, de, fr
-# Omit or leave empty to auto-detect.
-#WHISPER_LANGUAGE=
+# Language code for transcription. Recommended: uk, ru, en, or auto.
+# Omit, leave empty, or set to "auto" to auto-detect.
+# Auto-detect samples only the first ~30s and picks ONE language for the whole
+# file; Ukrainian is often mislabeled as Russian. Set this explicitly for a
+# known-language meeting (e.g. uk) to avoid that. Any faster-whisper code works.
+# See the README "Language selection" section for details.
+#WHISPER_LANGUAGE=uk
 
 # Ollama model for summarization
 # Default: llama3.1:8b

@@ -89,6 +89,23 @@ For best results:
 ./meeting-notes.sh full -m medium -o mixtral:8x7b
 ```
 
+## Language & accuracy (uk/ru/en)
+
+`large-v3` is now the default Whisper model — best multilingual accuracy, but
+slower on CPU. For known-language meetings, set the language explicitly instead
+of relying on auto-detect (which samples only the first ~30s and often mislabels
+Ukrainian as Russian):
+
+```bash
+./hushnote full -l uk     # or -l ru / -l en; -l auto to auto-detect
+```
+
+Set a permanent default with `WHISPER_LANGUAGE=uk` in `.hushnoterc`. See the
+[Language selection](README.md#language-selection-ukrainian--russian--english)
+section in the README for the full guidance — including a user verification step
+for measuring accuracy on your own recordings, which needs your own audio and
+can't be done for you.
+
 ## Common Commands
 
 ```bash
