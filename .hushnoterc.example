@@ -28,12 +28,19 @@
 # Default: ffmpeg
 #RECORD_BACKEND=ffmpeg
 
-# Audio source type: mic, sink, or both
-#   mic   — microphone input only
-#   sink  — system audio (sink monitor) only, captures what plays through speakers
-#   both  — mix mic and sink monitor (useful for recording calls)
-# Default: mic
-#AUDIO_SOURCE_TYPE=mic
+# Audio source type: microphone, monitor, both, or dual
+#   microphone — microphone input only (default; any unrecognized value also
+#                falls back to the default source)
+#   monitor    — system audio (sink monitor) only, captures what plays through
+#                speakers
+#   both       — mix mic and sink monitor into one track (useful for recording
+#                calls; the mixed fallback)
+#   dual       — record two synchronized tracks: microphone -> voice (You) and
+#                sink monitor -> system (Remote). The transcript is labeled by
+#                track of origin (You vs Remote) without diarization.
+# dual honors RECORD_BACKEND (ffmpeg or pw-record) just like the other modes.
+# Default: microphone
+#AUDIO_SOURCE_TYPE=microphone
 
 # Unload Ollama models before transcription to free VRAM for Whisper.
 # Set to 1 if you run into out-of-memory errors during transcription.

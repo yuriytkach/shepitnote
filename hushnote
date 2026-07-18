@@ -75,6 +75,9 @@ Options:
 
 Environment Variables:
     RECORDINGS_DIR      Directory for recordings (default: ./recordings)
+    AUDIO_SOURCE_TYPE   Capture mode: microphone (default), monitor, both, or
+                        dual. dual records separate You (mic) and Remote (system)
+                        tracks and labels the transcript by origin, no diarization.
     WHISPER_MODEL       Default Whisper model (default: base)
     OLLAMA_MODEL        Default Ollama model (default: llama3.1:8b)
     OLLAMA_URL          Ollama API URL (default: http://localhost:11434)
@@ -203,6 +206,23 @@ record_meeting() {
     else
         log_error "Failed to capture recording output or file doesn't exist"
         return 1
+    fi
+}
+
+detect_dual_tracks() {
+    # Given any track path (voice/system/plain wav or mp3), resolve the meeting
+    # base and echo it iff BOTH the voice and system WAV tracks exist. Echoes
+    # nothing otherwise, so callers can test with [ -n "$(detect_dual_tracks ...)" ].
+    local path="$1"
+    local base
+    case "$path" in
+        *.voice.wav)  base="${path%.voice.wav}" ;;
+        *.system.wav) base="${path%.system.wav}" ;;
+        *)            base="${path%.*}" ;;
+    esac
+
+    if [ -f "${base}.voice.wav" ] && [ -f "${base}.system.wav" ]; then
+        echo "$base"
     fi
 }
 
@@ -463,6 +483,22 @@ full_workflow() {
 
     echo ""
 
+    # Dual-track recording (AUDIO_SOURCE_TYPE=dual): two synced tracks were
+    # recorded (voice=You, system=Remote). Detect the pair from the returned
+    # voice-track path and process it without diarization.
+    local dual_base
+    dual_base=$(detect_dual_tracks "$audio_file")
+    if [ -n "$dual_base" ]; then
+        local dual_args=(-m "$whisper_model")
+        [ -n "$whisper_language" ] && dual_args+=(-l "$whisper_language")
+        [ -n "$ollama_model" ] && dual_args+=(-o "$ollama_model")
+        [ "$enable_compression" = false ] && dual_args+=(--no-compress)
+        [ "$keep_wav" = true ] && dual_args+=(--keep-wav)
+        [ "$clean_all" = true ] && dual_args+=(--clean)
+        process_dual_meeting "$dual_base" "${dual_args[@]}"
+        return 0
+    fi
+
     if [ "$enable_diarization" = true ]; then
         # Diarization workflow: 7 steps
 
@@ -686,6 +722,175 @@ full_workflow() {
         run_post_summary_hook "$summary_file" && \
             touch "${summary_file%_summary.md}.hook_done" || true
     fi
+}
+
+process_dual_meeting() {
+    # Process a dual-track recording: transcribe the voice (You) and system
+    # (Remote) tracks separately, tag each segment by track of origin, merge by
+    # timestamp, then render and summarize. No diarization is used for You vs
+    # Remote — that split comes from the two physical tracks.
+    local base="$1"
+    shift
+
+    local model="$WHISPER_MODEL"
+    local language="$WHISPER_LANGUAGE"
+    local ollama_model="$OLLAMA_MODEL"
+    local enable_compression=true
+    local keep_wav=false
+    local clean_all=false
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -m|--model)
+                model="$2"
+                shift 2
+                ;;
+            -l|--language)
+                language="$2"
+                shift 2
+                ;;
+            -o|--ollama)
+                ollama_model="$2"
+                shift 2
+                ;;
+            --no-compress)
+                enable_compression=false
+                shift
+                ;;
+            --keep-wav)
+                keep_wav=true
+                shift
+                ;;
+            --clean)
+                clean_all=true
+                shift
+                ;;
+            *)
+                shift
+                ;;
+        esac
+    done
+
+    local voice_wav="${base}.voice.wav"
+    local system_wav="${base}.system.wav"
+
+    if [ ! -f "$voice_wav" ] || [ ! -f "$system_wav" ]; then
+        log_error "Dual tracks not found for: $(basename "$base")"
+        return 1
+    fi
+
+    log_info "Processing dual-track recording: $(basename "$base")"
+    log_info "Using Whisper model: $model"
+    [ -n "$language" ] && log_info "Language: $language"
+    echo ""
+
+    # Step 1: Transcribe the voice track (You).
+    log_info "Step 1: Transcribing voice track (You)..."
+    local voice_json="${base}.voice.json"
+    local voice_cmd=("$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$voice_wav" -m "$model" -f json -o "$voice_json")
+    [ -n "$language" ] && voice_cmd+=(-l "$language")
+    "${voice_cmd[@]}"
+
+    if [ ! -f "$voice_json" ]; then
+        log_error "Voice track transcription failed"
+        return 1
+    fi
+    echo ""
+
+    # Step 2: Transcribe the system track (Remote).
+    log_info "Step 2: Transcribing system track (Remote)..."
+    local system_json="${base}.system.json"
+    local system_cmd=("$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$system_wav" -m "$model" -f json -o "$system_json")
+    [ -n "$language" ] && system_cmd+=(-l "$language")
+    "${system_cmd[@]}"
+
+    if [ ! -f "$system_json" ]; then
+        log_error "System track transcription failed"
+        return 1
+    fi
+    echo ""
+
+    # Step 3: Merge tracks — label by origin (You vs Remote), no diarization.
+    log_info "Step 3: Merging tracks (You vs Remote)..."
+    local labeled_file="${base}_speakers_labeled.json"
+    "$PYTHON" "${SCRIPT_DIR}/merge_tracks.py" \
+        --voice "$voice_json" --system "$system_json" \
+        --audio-file "$(basename "$voice_wav")" -o "$labeled_file"
+
+    if [ ! -f "$labeled_file" ]; then
+        log_error "Track merge failed"
+        return 1
+    fi
+    echo ""
+
+    # Step 4: Render final transcript named after the meeting base so status/
+    # list see meeting_TS.txt.
+    log_info "Step 4: Creating final transcript with You/Remote labels..."
+    local transcription_file="${base}.txt"
+    apply_speaker_labels "$labeled_file" -f txt -o "$transcription_file" >/dev/null
+
+    if [ ! -f "$transcription_file" ]; then
+        log_error "Apply labels failed"
+        return 1
+    fi
+    echo ""
+
+    # Step 5: Summarize.
+    log_info "Step 5: Generating summary..."
+    local summary_file
+    if [ -n "$ollama_model" ]; then
+        summary_file=$(summarize_meeting "$transcription_file" -o "$ollama_model")
+    else
+        summary_file=$(summarize_meeting "$transcription_file")
+    fi
+
+    if [ -z "$summary_file" ] || [ ! -f "$summary_file" ]; then
+        log_error "Summarization failed"
+        return 1
+    fi
+    echo ""
+
+    # Step 6: Compress or clean each track. Silent-tail trimming is skipped in
+    # dual mode — per-track trimming would desync turn ordering.
+    local voice_audio="$voice_wav"
+    local system_audio="$system_wav"
+    if [ "$clean_all" = true ]; then
+        log_info "Step 6: Removing all audio files..."
+        [ -f "$voice_wav" ]  && rm "$voice_wav"  && log_success "Deleted: $voice_wav"
+        [ -f "$system_wav" ] && rm "$system_wav" && log_success "Deleted: $system_wav"
+        [ -f "${base}.voice.mp3" ]  && rm "${base}.voice.mp3"  && log_success "Deleted: ${base}.voice.mp3"
+        [ -f "${base}.system.mp3" ] && rm "${base}.system.mp3" && log_success "Deleted: ${base}.system.mp3"
+        voice_audio="(deleted)"
+        system_audio="(deleted)"
+        echo ""
+    elif [ "$enable_compression" = true ]; then
+        log_info "Step 6: Compressing tracks to MP3..."
+        local mp3
+        if [ "$keep_wav" = true ]; then
+            mp3=$(compress_audio "$voice_wav")
+            [ -n "$mp3" ] && [ -f "$mp3" ] && voice_audio="$mp3"
+            mp3=$(compress_audio "$system_wav")
+            [ -n "$mp3" ] && [ -f "$mp3" ] && system_audio="$mp3"
+        else
+            mp3=$(compress_audio "$voice_wav" --delete-wav)
+            [ -n "$mp3" ] && [ -f "$mp3" ] && voice_audio="$mp3"
+            mp3=$(compress_audio "$system_wav" --delete-wav)
+            [ -n "$mp3" ] && [ -f "$mp3" ] && system_audio="$mp3"
+        fi
+        echo ""
+    fi
+
+    log_success "Dual-track processing complete!"
+    echo ""
+    echo "Files generated:"
+    echo "  Audio (voice/You):     $voice_audio"
+    echo "  Audio (system/Remote): $system_audio"
+    echo "  Labeled:               $labeled_file"
+    echo "  Transcription:         $transcription_file"
+    echo "  Summary:               $summary_file"
+
+    run_post_summary_hook "$summary_file" && \
+        touch "${summary_file%_summary.md}.hook_done" || true
 }
 
 diarize_meeting() {
@@ -1157,6 +1362,13 @@ catchup_recordings() {
 
             local wav_file="${base}.wav"
             local mp3_file="${base}.mp3"
+            # Dual-track recordings (AUDIO_SOURCE_TYPE=dual) never create the
+            # mixed ${base}.wav; they leave ${base}.voice.wav + ${base}.system.wav
+            # on disk until processed. Recognise that pair so catchup does not
+            # silently skip a pending dual meeting.
+            local dual_voice="${base}.voice.wav"
+            local has_dual=false
+            [ -f "$dual_voice" ] && [ -f "${base}.system.wav" ] && has_dual=true
             local summary_file="${base}_summary.md"
             local hook_done_file="${base}.hook_done"
 
@@ -1177,10 +1389,13 @@ except Exception:
             fi
 
             # Case 1: has audio but no summary → needs processing
-            if [ ! -f "$summary_file" ] && ( [ -f "$wav_file" ] || [ -f "$mp3_file" ] ); then
+            if [ ! -f "$summary_file" ] && ( [ -f "$wav_file" ] || [ -f "$mp3_file" ] || $has_dual ); then
                 local audio_file=""
                 [ -f "$wav_file" ] && audio_file="$wav_file"
                 [ -f "$mp3_file" ] && [ -z "$audio_file" ] && audio_file="$mp3_file"
+                # For a dual recording, hand `process` the voice track path; its
+                # detect_dual_tracks resolves the pair and routes to dual processing.
+                $has_dual && [ -z "$audio_file" ] && audio_file="$dual_voice"
 
                 log_info "[$title] Needs processing: $(basename "$audio_file")"
                 processed=$((processed + 1))
@@ -1281,8 +1496,19 @@ status_recordings() {
             [ -f "$summary_file" ]   && has_summary=true
             [ -f "$hook_done_file" ] && has_hook_done=true
 
+            # Dual-track recordings (AUDIO_SOURCE_TYPE=dual) store audio as a
+            # voice/system pair, never as the mixed ${base}.wav, so a pending dual
+            # meeting would otherwise be invisible in status. Recognise the pair
+            # (raw WAVs while pending, MP3s once compressed after processing).
+            local has_dual=false dual_audio=""
+            if [ -f "${base}.voice.wav" ] && [ -f "${base}.system.wav" ]; then
+                has_dual=true; dual_audio="${base}.voice.wav"
+            elif [ -f "${base}.voice.mp3" ] && [ -f "${base}.system.mp3" ]; then
+                has_dual=true; dual_audio="${base}.voice.mp3"
+            fi
+
             # Skip dirs with no recognisable audio at all and no txt either
-            if ! $has_wav && ! $has_mp3 && ! $has_txt; then
+            if ! $has_wav && ! $has_mp3 && ! $has_txt && ! $has_dual; then
                 continue
             fi
 
@@ -1306,7 +1532,7 @@ status_recordings() {
                 status_text="transcribed, no summary"
                 status_color="$YELLOW"
                 partial=$((partial + 1))
-            elif $has_wav || $has_mp3; then
+            elif $has_wav || $has_mp3 || $has_dual; then
                 status_text="recorded, not processed"
                 status_color="$YELLOW"
                 pending=$((pending + 1))
@@ -1334,6 +1560,7 @@ except Exception:
             local audio_for_dur=""
             $has_wav && audio_for_dur="$wav_file"
             $has_mp3 && audio_for_dur="$mp3_file"
+            [ -z "$audio_for_dur" ] && $has_dual && audio_for_dur="$dual_audio"
             if [ -n "$audio_for_dur" ] && command -v ffprobe &>/dev/null; then
                 local secs
                 secs=$(ffprobe -v error -show_entries format=duration \
@@ -1553,7 +1780,19 @@ main() {
             # The subshell runs as a background job; a watchdog kills the process group
             # with SIGTERM after process_timeout seconds, then SIGKILL after 30 more.
             (
-            if [ "$enable_diarization" = true ]; then
+            # Dual-track recording? Process the You/Remote pair without
+            # diarization. Runs inside the subshell so the timeout still applies.
+            local dual_base
+            dual_base=$(detect_dual_tracks "$audio_file")
+            if [ -n "$dual_base" ]; then
+                local dual_args=(-m "$whisper_model")
+                [ -n "$whisper_language" ] && dual_args+=(-l "$whisper_language")
+                [ -n "$ollama_model" ] && dual_args+=(-o "$ollama_model")
+                [ "$enable_compression" = false ] && dual_args+=(--no-compress)
+                [ "$keep_wav" = true ] && dual_args+=(--keep-wav)
+                [ "$clean_all" = true ] && dual_args+=(--clean)
+                process_dual_meeting "$dual_base" "${dual_args[@]}"
+            elif [ "$enable_diarization" = true ]; then
                 log_info "Processing recording with diarization: $audio_file"
                 echo ""
 

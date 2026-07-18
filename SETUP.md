@@ -51,6 +51,30 @@ pactl set-default-source 98  # Use webcam mic
 pactl set-default-source 64  # Use USB mic
 ```
 
+### Dual-track capture (You/Remote)
+
+To capture your voice and the remote side as two separate, synchronized tracks
+(so the transcript is labeled by origin without diarization), set
+`AUDIO_SOURCE_TYPE=dual`. The two tracks map like this:
+
+- **You** ← the default *source* (your microphone): `pactl get-default-source`
+- **Remote** ← the monitor of the default *sink* (what plays through your
+  speakers/headset): `pactl get-default-sink` (its `.monitor` is captured)
+
+So point your default source at the mic you speak into and your default sink at
+the device the call audio plays out of, then run:
+
+```bash
+AUDIO_SOURCE_TYPE=dual ./hushnote full -d 10 -m tiny -o mistral:7b
+```
+
+For Bluetooth headsets in HSP/HFP mode, ffmpeg's PulseAudio capture can be
+silent; use the PipeWire backend instead:
+
+```bash
+AUDIO_SOURCE_TYPE=dual RECORD_BACKEND=pw-record ./hushnote full
+```
+
 ## Recommended Settings
 
 For best results:

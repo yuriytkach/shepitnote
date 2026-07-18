@@ -6,7 +6,7 @@ HushNote is a local-only, offline-capable voice transcription and meeting summar
 
 ## Features
 
-- **🎙️ Audio Recording**: Capture system audio, microphone, or both simultaneously via PulseAudio/PipeWire
+- **🎙️ Audio Recording**: Capture system audio, microphone, both mixed, or two synchronized You/Remote tracks (dual mode) via PulseAudio/PipeWire
 - **📝 Speech-to-Text Transcription**: Convert audio to text using faster-whisper (offline, GPU-accelerated, auto language detection)
 - **✂️ Silent Tail Trimming**: Automatically detects and removes silent tails from recordings (e.g. when you forget to stop recording) using binary search — fast regardless of file length
 - **👥 Speaker Diarization**: Identify who spoke when with interactive speaker labeling
@@ -135,6 +135,34 @@ Options:
 ./hushnote trim recordings/meeting.mp3
 ```
 
+### Dual-track (You/Remote) recording
+
+For calls where you want reliable "who said what" without diarization, set
+`AUDIO_SOURCE_TYPE=dual`. HushNote records two time-synchronized tracks from a
+single command — your microphone (You) and the system sink monitor (Remote):
+
+```bash
+AUDIO_SOURCE_TYPE=dual ./hushnote full
+```
+
+This produces `meeting_TS.voice.wav` (You) and `meeting_TS.system.wav` (Remote).
+Each track is transcribed separately, every segment is tagged by its track of
+origin, and the two are interleaved by timestamp into one transcript with
+`[You]` / `[Remote]` labels — no diarization guessing over a blended track.
+
+Notes:
+
+- Local vs remote is decided by track of origin, so labeling is reliable even
+  when both sides overlap. pyannote diarization is **reserved** only for the
+  optional future case of splitting multiple remote speakers on the system
+  track (deferred — dual mode ships with a single `Remote` label).
+- Silent-tail trimming is **skipped** in dual mode, because per-track trimming
+  would desync turn ordering.
+- Dual honors `RECORD_BACKEND`; use `RECORD_BACKEND=pw-record` for Bluetooth
+  HSP/HFP headsets.
+- The existing mixed `AUDIO_SOURCE_TYPE=both` mode (one blended WAV) remains
+  available as a fallback.
+
 See [DIARIZATION.md](DIARIZATION.md) for the full speaker diarization guide.
 
 ## Pipeline
@@ -164,6 +192,20 @@ Recordings are organized by date and meeting:
         ├── meeting_20260310_090012_summary.md    # meeting summary
         ├── meeting_20260310_090012_metadata.json # title, timestamp
         └── meeting_20260310_090012.hook_done     # written after hook runs
+```
+
+For **dual** meetings (`AUDIO_SOURCE_TYPE=dual`) the single audio file is
+replaced by a voice/system pair (trimming is skipped, so both are compressed as
+they were recorded):
+
+```
+    meeting_20260310_090012/
+    ├── meeting_20260310_090012.voice.mp3          # your mic track (You)
+    ├── meeting_20260310_090012.system.mp3         # system audio track (Remote)
+    ├── meeting_20260310_090012_speakers_labeled.json  # merged, You/Remote tagged
+    ├── meeting_20260310_090012.txt                # transcript with [You]/[Remote]
+    ├── meeting_20260310_090012_summary.md         # meeting summary
+    └── meeting_20260310_090012_metadata.json      # title, timestamp, mode: dual
 ```
 
 ## Post-Summary Hook
