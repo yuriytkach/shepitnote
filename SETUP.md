@@ -169,3 +169,17 @@ This will:
 3. Generate a summary using Mistral 7B
 
 Check the `recordings/` directory for the output files.
+
+## Publishing summaries to Confluence
+
+To auto-publish each summary to a Confluence space, point `POST_SUMMARY_HOOK` at the
+bundled `hooks/confluence_publish.py` and set the `CONFLUENCE_*` variables in
+`.hushnoterc`. Preview the output first, without any credentials:
+
+```bash
+hooks/confluence_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.md --dry-run
+```
+
+See the [Confluence publishing](README.md#confluence-publishing) section of the README for
+the full setup (getting an API token, the page-title/idempotency behavior, and the note that
+confirm-gating arrives with the terminal UI, issue #5).

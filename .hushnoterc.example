@@ -102,6 +102,57 @@
 #
 # Example using the bundled hushnote-to-outline script:
 #POST_SUMMARY_HOOK="${HOME}/.local/bin/hushnote-to-outline"
+#
+# Example using the bundled Confluence publisher (issue #3, see the CONFLUENCE_*
+# block below and the README "Confluence publishing" section):
+#POST_SUMMARY_HOOK="${HOME}/path/to/hushnote/hooks/confluence_publish.py"
+
+# --- Confluence publishing (issue #3) -------------------------------------
+# Used only by hooks/confluence_publish.py (set POST_SUMMARY_HOOK above to it).
+# The hook converts each summary to Confluence storage format and creates — or,
+# on re-run, updates — a page titled "<meeting title> - YYYY-MM-DD" (or
+# "Meeting HH:MM - YYYY-MM-DD" when the recording had no title) in the target
+# space. Re-running the same meeting updates the same page, never duplicates.
+#
+# NOTE: the hook publishes whenever it is invoked. Confirm-gating before publish
+# arrives with the terminal UI (issue #5); for now enabling it is opt-in purely
+# by setting POST_SUMMARY_HOOK. Preview output first with the dry-run below.
+#
+# Preview without any credentials (prints the storage XHTML, no API call):
+#   hooks/confluence_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.md --dry-run
+#
+# Required for a real publish:
+# CONFLUENCE_BASE_URL: your wiki base, NO trailing /rest/api.
+#   Cloud:      https://yourorg.atlassian.net/wiki
+#   Server/DC:  https://confluence.yourorg.com
+#CONFLUENCE_BASE_URL="https://yourorg.atlassian.net/wiki"
+#
+# CONFLUENCE_SPACE_KEY: the target space key (e.g. ENG, TEAM, ~yourname).
+#CONFLUENCE_SPACE_KEY="ENG"
+#
+# CONFLUENCE_API_TOKEN: Cloud API token OR Server/DC Personal Access Token.
+#   Cloud token:  https://id.atlassian.com/manage-profile/security/api-tokens
+#   Server/DC PAT: your profile -> Personal Access Tokens
+# Never commit a real token; keep it in your private .hushnoterc only.
+#CONFLUENCE_API_TOKEN="your-api-token"
+#
+# Optional:
+# CONFLUENCE_EMAIL: your Atlassian account email. Its presence selects Cloud
+#   HTTP Basic (email:token); leave it unset for Server/DC Bearer (PAT) auth.
+#CONFLUENCE_EMAIL="you@yourorg.com"
+#
+# CONFLUENCE_PARENT_PAGE_ID: numeric id of a parent page. When set, new pages are
+#   created under it and updates re-assert it as the parent.
+#CONFLUENCE_PARENT_PAGE_ID="123456"
+#
+# CONFLUENCE_AUTH_MODE: force the auth scheme, "basic" or "bearer". When unset it
+#   is derived from CONFLUENCE_EMAIL (set -> basic, unset -> bearer).
+#CONFLUENCE_AUTH_MODE="basic"
+#
+# CONFLUENCE_DRY_RUN: set to 1 to force dry-run (same as the --dry-run flag) — the
+#   hook prints the storage XHTML and never calls the API.
+#CONFLUENCE_DRY_RUN=1
+# --------------------------------------------------------------------------
 
 # Notification command override. By default hushnote uses dunstify (if available)
 # with replace-by-ID so reminders update in place, falling back to notify-send.

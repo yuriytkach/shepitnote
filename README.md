@@ -390,6 +390,59 @@ POST_SUMMARY_HOOK="${HOME}/.local/bin/my-upload-script"
 
 Use this to upload to Outline, Notion, a webhook, or any other destination. See `.hushnoterc.example` for details.
 
+### Confluence publishing
+
+HushNote ships a post-summary hook, `hooks/confluence_publish.py`, that converts each
+summary to Confluence storage format and creates — or, on re-run, updates — a page in a
+configured space (issue #3). Point `POST_SUMMARY_HOOK` at it to enable:
+
+```bash
+# In .hushnoterc:
+POST_SUMMARY_HOOK="${HOME}/path/to/hushnote/hooks/confluence_publish.py"
+```
+
+**Configuration** (all read from the environment; `.hushnoterc` is sourced before the hook
+runs, so set them there — see `.hushnoterc.example` for the annotated block):
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `CONFLUENCE_BASE_URL` | yes | Wiki base, no trailing `/rest/api`. Cloud: `https://yourorg.atlassian.net/wiki`; Server/DC: `https://confluence.yourorg.com` |
+| `CONFLUENCE_SPACE_KEY` | yes | Target space key (e.g. `ENG`) |
+| `CONFLUENCE_API_TOKEN` | yes | Cloud API token or Server/DC Personal Access Token (never hardcoded) |
+| `CONFLUENCE_EMAIL` | no | Atlassian account email; its presence selects Cloud Basic auth |
+| `CONFLUENCE_PARENT_PAGE_ID` | no | Numeric parent page id; new pages are created under it and updates re-assert it |
+| `CONFLUENCE_AUTH_MODE` | no | Force `basic` or `bearer`; otherwise derived from whether `CONFLUENCE_EMAIL` is set |
+| `CONFLUENCE_DRY_RUN` | no | `=1` forces dry-run (same as `--dry-run`) |
+
+**Getting a token.** On **Confluence Cloud**, create an API token at
+[id.atlassian.com](https://id.atlassian.com/manage-profile/security/api-tokens) and set
+`CONFLUENCE_EMAIL` + `CONFLUENCE_API_TOKEN` (auth is HTTP Basic `email:token`). On **Server /
+Data Center**, create a Personal Access Token in your profile and set `CONFLUENCE_API_TOKEN`
+with no email (auth is `Bearer <PAT>`).
+
+**Page title and idempotency.** The page title is `"<meeting title> - YYYY-MM-DD"`, or
+`"Meeting HH:MM - YYYY-MM-DD"` when the recording had no title (both derived from the sibling
+`<base>_metadata.json`, falling back to the timestamp in the filename). Because that title is
+stable for a given meeting, the hook searches the space for it and **updates the existing page**
+(version incremented) instead of creating a duplicate — re-running `catchup`/`process` on the
+same meeting is safe. The created page id is also cached in a sibling
+`<base>.confluence_page_id` marker as a fallback lookup (guards against Cloud search-index lag).
+
+**Dry-run — preview before publishing.** Run the hook with `--dry-run` (needs no credentials)
+to resolve the title and print the storage-format XHTML without touching the API:
+
+```bash
+hooks/confluence_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.md --dry-run
+```
+
+Inspect the output, then set the `CONFLUENCE_*` config and let the hook publish for real.
+
+**Confirm-gating.** The interactive confirm step before a publish arrives with the terminal UI
+(issue #5), which does not exist yet. For now the hook simply publishes whenever it is invoked;
+enabling it is opt-in purely by setting `POST_SUMMARY_HOOK`. If a publish fails (missing config,
+API/network error) the hook exits non-zero, so hushnote does not write the `.hook_done` marker
+and retries it on the next `catchup`/`process`.
+
 ## Troubleshooting
 
 **No audio captured:**
