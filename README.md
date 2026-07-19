@@ -389,6 +389,13 @@ Each track is transcribed separately, every segment is tagged by its track of
 origin, and the two are interleaved by timestamp into one transcript with
 `[You]` / `[Remote]` labels — no diarization guessing over a blended track.
 
+> **On open speakers without a headset,** your mic records the remote audio
+> playing aloud, so the You track becomes an echo of Remote. Run
+> **`./shepitnote aec on`** before the call to cancel it in real time (WebRTC);
+> `aec off` restores everything. See
+> [Echo cancellation](#echo-cancellation-open-speaker-meetings). With a headset
+> you don't need it.
+
 Notes:
 
 - Local vs remote is decided by track of origin, so labeling is reliable even
@@ -403,6 +410,32 @@ Notes:
   available as a fallback.
 
 See [DIARIZATION.md](DIARIZATION.md) for the full speaker diarization guide.
+
+### Echo cancellation (open-speaker meetings)
+
+If you take calls on laptop speakers without a headset, the mic records the
+remote audio playing aloud and the You track becomes a duplicate of Remote.
+ShepitNote wraps PipeWire's WebRTC echo canceller behind a simple toggle:
+
+```bash
+./shepitnote aec on       # cancel the remote bleed from your mic (real time)
+./shepitnote aec status   # is it active?
+./shepitnote aec off      # restore your original devices and unload it
+```
+
+- **Off by default and fully reversible** (also reverts on reboot). Turn it on
+  before a speaker meeting, off afterwards.
+- **Enable before joining** for the cleanest result; enabling mid-call also works
+  (it pulls the in-progress call's audio into the canceller) after a moment to
+  adapt.
+- **Also cleans your mic for Zoom/Meet/Slack**, since it switches your default
+  input to the cancelled mic.
+- **Double-talk is fine:** Remote is captured separately from the system audio
+  (never touched by AEC) and the canceller preserves your voice, so both sides
+  land on their own track.
+- **Streaming with an external mic (OBS)?** Leave it off — it only affects
+  capture while enabled. It pins to whichever mic/speaker was default at `aec on`
+  time, so after switching devices, run `aec off` then `aec on` again.
 
 ## Pipeline
 

@@ -92,11 +92,43 @@ the device the call audio plays out of, then run:
 AUDIO_SOURCE_TYPE=dual ./shepitnote full -d 10 -m tiny -o mistral:7b
 ```
 
-> **Tip: use a headset for the cleanest separation.** On open laptop speakers
-> the microphone also picks up the remote audio playing aloud, so your **You**
-> track carries a faint echo of the **Remote** side. It's harmless, but Whisper
-> may transcribe that echo as extra `[You]` text. A headset (nothing plays out
-> loud) keeps the two tracks cleanly separated.
+> **On open speakers (no headset)?** Your microphone also picks up the remote
+> audio playing aloud, so the **You** track becomes an echo of the **Remote**
+> side and Whisper transcribes it as duplicate `[You]` text. Two ways to fix it:
+>
+> - **Echo cancellation (recommended for speakers):** run `./shepitnote aec on`
+>   before the meeting. It removes the remote bleed from your mic in real time
+>   (WebRTC), so the You track is just your voice. See
+>   [Echo cancellation](#echo-cancellation-open-speaker-meetings) below.
+> - **A headset:** nothing plays out loud, so the two tracks stay separated with
+>   no processing.
+
+### Echo cancellation (open-speaker meetings)
+
+If you take calls on laptop speakers without a headset, enable acoustic echo
+cancellation so your mic stops recording the remote side:
+
+```bash
+./shepitnote aec on       # load the WebRTC canceller, route your mic/speaker through it
+./shepitnote aec status   # check whether it's active
+./shepitnote aec off      # restore your original devices and unload it
+```
+
+It's **off by default** and fully reversible (and reverts on reboot) — turn it
+on before a speaker meeting, off afterwards. Notes:
+
+- **Enable it before you join the call** for the cleanest result. If you forget,
+  running `aec on` mid-call still works — it pulls the in-progress call's audio
+  into the canceller — but give it a second or two to adapt.
+- **It also cleans your mic for Zoom/Meet/Slack**, not just ShepitNote, because
+  it switches your default input to the cancelled mic.
+- **Talking over each other is fine.** The Remote track is captured separately
+  from the system audio (never touched by AEC), and the canceller keeps your
+  voice during double-talk — so both sides are transcribed on their own track.
+- **Streaming/recording with an external mic (e.g. OBS)?** Just leave AEC off
+  (it is, by default). It only affects capture while enabled, and `aec off`
+  restores everything. It also pins to whatever mic/speaker was default when you
+  ran `aec on`, so if you switch audio devices, run `aec off` then `aec on` again.
 
 For Bluetooth headsets in HSP/HFP mode, ffmpeg's PulseAudio capture can be
 silent; use the PipeWire backend instead:

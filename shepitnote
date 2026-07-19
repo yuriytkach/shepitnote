@@ -59,6 +59,7 @@ Commands:
     list               List all recordings
     status             Show status of all recordings (what needs processing)
     catchup            Process all unfinished recordings and run post-summary hook
+    aec {on|off|status} Echo cancellation for open-speaker meetings (no headset)
 
 Options:
     -d, --duration SEC  Recording duration in seconds (default: manual stop with Ctrl+C)
@@ -181,6 +182,184 @@ check_python_env() {
         log_error "Run ./setup.sh, or: \"$PYTHON\" -m pip install faster-whisper requests"
         exit 1
     fi
+}
+
+# ---------------------------------------------------------------------------
+# Acoustic echo cancellation (AEC)
+#
+# On open speakers (no headset) the mic picks up the remote audio playing aloud,
+# so the You track carries an echo of the Remote side. This wraps PipeWire's
+# WebRTC echo-cancel module: it makes a virtual cancelled mic + a virtual sink
+# (which forwards to the real speakers AND feeds the canceller its reference),
+# then points the system defaults at them. ShepitNote's dual capture uses the
+# defaults, so once AEC is on, the You track is echo-free with no other changes.
+# It also cleans your mic for every other app (Zoom/Meet), not just ShepitNote.
+# ---------------------------------------------------------------------------
+AEC_STATE_FILE="${XDG_RUNTIME_DIR:-/tmp}/shepitnote-aec.state"
+AEC_SOURCE_NAME="echocancel_source"
+AEC_SINK_NAME="echocancel_sink"
+
+aec_is_loaded() {
+    pactl list short modules 2>/dev/null \
+        | grep -q "module-echo-cancel.*${AEC_SOURCE_NAME}"
+}
+
+# Move existing playback streams onto the echo-cancel sink, so turning AEC on
+# mid-call also routes the ongoing call through the canceller (streams do not
+# follow a default change on their own). Playback only — we deliberately do NOT
+# move capture streams, so other apps' mics (e.g. OBS) are left alone. The
+# canceller's own stream, if listed, is skipped by its echo-cancel name.
+_aec_move_playback_streams() {
+    local id
+    while read -r id; do
+        [ -n "$id" ] && pactl move-sink-input "$id" "$AEC_SINK_NAME" 2>/dev/null
+    done < <(pactl list sink-inputs 2>/dev/null | awk '
+        /^Sink Input #/ { if (id != "" && ec == 0) print id; id = substr($3, 2); ec = 0; next }
+        { if (tolower($0) ~ /echo-cancel|echocancel/) ec = 1 }
+        END { if (id != "" && ec == 0) print id }
+    ')
+}
+
+aec_on() {
+    if ! command -v pactl >/dev/null 2>&1; then
+        log_error "pactl not found (need PulseAudio/PipeWire tools)."; return 1
+    fi
+    if aec_is_loaded || [ -f "$AEC_STATE_FILE" ]; then
+        log_warn "Echo cancellation already appears active. Use 'aec status' or 'aec off'."
+        return 0
+    fi
+    local src sink
+    src=$(pactl get-default-source 2>/dev/null)
+    sink=$(pactl get-default-sink 2>/dev/null)
+    case "$src" in *echocancel*)
+        log_error "Default source is already an echo-cancel device. Run 'aec off' first."
+        return 1 ;;
+    esac
+    if [ -z "$src" ] || [ -z "$sink" ]; then
+        log_error "Could not read default source/sink from pactl."; return 1
+    fi
+    log_info "Loading WebRTC echo canceller..."
+    log_info "  mic (master):     $src"
+    log_info "  speaker (master): $sink"
+    local modid
+    modid=$(pactl load-module module-echo-cancel \
+        aec_method=webrtc \
+        source_name="$AEC_SOURCE_NAME" \
+        sink_name="$AEC_SINK_NAME" \
+        source_master="$src" \
+        sink_master="$sink" \
+        use_master_format=1 2>&1)
+    if ! [[ "$modid" =~ ^[0-9]+$ ]]; then
+        log_error "Failed to load module-echo-cancel: $modid"
+        return 1
+    fi
+    # Wait (bounded, no sleep) for the virtual source to appear before switching.
+    local tries=0
+    until pactl list short sources 2>/dev/null | grep -q "$AEC_SOURCE_NAME"; do
+        tries=$((tries + 1)); [ "$tries" -ge 50 ] && break
+    done
+    pactl set-default-source "$AEC_SOURCE_NAME" 2>/dev/null \
+        || log_warn "Could not set default source to $AEC_SOURCE_NAME"
+    pactl set-default-sink "$AEC_SINK_NAME" 2>/dev/null \
+        || log_warn "Could not set default sink to $AEC_SINK_NAME"
+    # Pull already-playing audio through the canceller too (mid-call enable).
+    _aec_move_playback_streams
+    printf 'MODULE_ID=%s\nORIG_SOURCE=%s\nORIG_SINK=%s\n' \
+        "$modid" "$src" "$sink" > "$AEC_STATE_FILE"
+    log_success "Echo cancellation ON (module $modid). Your mic is now echo-cancelled."
+    log_info "Test it: AUDIO_SOURCE_TYPE=dual ./shepitnote meeting"
+    log_info "Turn off: ./shepitnote aec off   (also reverts on reboot)"
+}
+
+aec_off() {
+    if ! command -v pactl >/dev/null 2>&1; then
+        log_error "pactl not found (need PulseAudio/PipeWire tools)."; return 1
+    fi
+    # Decide the closing message from the state BEFORE we tear anything down.
+    local was_active=false
+    if aec_is_loaded || [ -f "$AEC_STATE_FILE" ] \
+       || pactl get-default-source 2>/dev/null | grep -q echocancel; then
+        was_active=true
+    fi
+    local modid="" orig_source="" orig_sink=""
+    if [ -f "$AEC_STATE_FILE" ]; then
+        # State file holds only MODULE_ID/ORIG_SOURCE/ORIG_SINK assignments.
+        # shellcheck disable=SC1090
+        . "$AEC_STATE_FILE"
+        modid="${MODULE_ID:-}"; orig_source="${ORIG_SOURCE:-}"; orig_sink="${ORIG_SINK:-}"
+    fi
+    # Restore defaults first so nothing points at a device we're about to remove.
+    [ -n "$orig_source" ] && pactl set-default-source "$orig_source" 2>/dev/null
+    [ -n "$orig_sink" ]   && pactl set-default-sink   "$orig_sink"   2>/dev/null
+    [ -n "$modid" ] && pactl unload-module "$modid" 2>/dev/null
+    # Safety net: unload any echo-cancel module we own that is still loaded.
+    local id
+    for id in $(pactl list short modules 2>/dev/null \
+                | awk -v n="$AEC_SOURCE_NAME" '/module-echo-cancel/ && $0 ~ n {print $1}'); do
+        pactl unload-module "$id" 2>/dev/null
+    done
+    # If a default still points at a now-removed echo-cancel device (e.g. it was
+    # loaded manually with no saved state), fall back to a real hardware device
+    # so audio isn't left routed to nothing.
+    local hw
+    if pactl get-default-source 2>/dev/null | grep -q echocancel; then
+        hw=$(pactl list short sources 2>/dev/null \
+             | awk '$2 !~ /echocancel/ && $2 !~ /\.monitor$/ {print $2; exit}')
+        [ -n "$hw" ] && pactl set-default-source "$hw" 2>/dev/null
+    fi
+    if pactl get-default-sink 2>/dev/null | grep -q echocancel; then
+        hw=$(pactl list short sinks 2>/dev/null | awk '$2 !~ /echocancel/ {print $2; exit}')
+        [ -n "$hw" ] && pactl set-default-sink "$hw" 2>/dev/null
+    fi
+    rm -f "$AEC_STATE_FILE"
+    if [ "$was_active" = true ]; then
+        log_success "Echo cancellation OFF (defaults restored)."
+    else
+        log_info "Echo cancellation was not active (nothing to turn off)."
+    fi
+}
+
+aec_status() {
+    echo "Echo cancellation (AEC) status:"
+    if aec_is_loaded; then
+        echo "  module:         LOADED (module-echo-cancel, webrtc)"
+    else
+        echo "  module:         not loaded"
+    fi
+    echo "  default source: $(pactl get-default-source 2>/dev/null)"
+    echo "  default sink:   $(pactl get-default-sink 2>/dev/null)"
+    [ -f "$AEC_STATE_FILE" ] && { echo "  saved state:"; sed 's/^/    /' "$AEC_STATE_FILE"; }
+    if pactl get-default-source 2>/dev/null | grep -q echocancel; then
+        echo "  => ACTIVE: your mic is echo-cancelled."
+    else
+        echo "  => INACTIVE: mic is NOT echo-cancelled. Enable with: ./shepitnote aec on"
+    fi
+}
+
+aec_command() {
+    case "${1:-}" in
+        on)      aec_on ;;
+        off)     aec_off ;;
+        status|"") aec_status ;;
+        -h|--help|help)
+            echo "Usage: $0 aec {on|off|status}"
+            echo ""
+            echo "Real-time acoustic echo cancellation for open-speaker meetings."
+            echo "Removes the remote audio bleed from your mic (the You track) using"
+            echo "PipeWire's WebRTC canceller, and also cleans your mic for Zoom/Meet."
+            echo ""
+            echo "  on      load the canceller and route your default mic/speaker through it"
+            echo "  off     restore your original defaults and unload the canceller"
+            echo "  status  show whether AEC is active"
+            echo ""
+            echo "AEC reverts on reboot; run 'aec on' again (or add it to autostart)."
+            ;;
+        *)
+            log_error "Unknown 'aec' subcommand: $1"
+            echo "Usage: $0 aec {on|off|status}" >&2
+            return 1
+            ;;
+    esac
 }
 
 record_meeting() {
@@ -2020,6 +2199,9 @@ main() {
                 log_info "To transcribe + summarize this recording, run:"
                 log_info "  ./shepitnote process-last"
             fi
+            ;;
+        aec)
+            aec_command "$@"
             ;;
         transcribe)
             if [ $# -eq 0 ]; then
