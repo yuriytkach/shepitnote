@@ -53,6 +53,7 @@ Commands:
     compress FILE       Compress WAV to MP3 and delete WAV
     clean FILE          Delete ALL audio files (WAV and MP3)
     full               Complete workflow: record, transcribe, and summarize
+    meeting            Guided flow: record, review, edit title, confirm-publish
     process FILE        Process existing recording (transcribe + diarize + summarize)
     process-last        Process most recent recording (transcribe + diarize + summarize)
     list               List all recordings
@@ -112,6 +113,9 @@ Examples:
 
     # Complete workflow: record, transcribe, and summarize
     $0 full
+
+    # Guided flow with review + confirm-gated publishing (SSH-friendly)
+    $0 meeting
 
     # List all recordings
     $0 list
@@ -1373,6 +1377,18 @@ list_recordings() {
 run_post_summary_hook() {
     local summary_file="$1"
 
+    # The guided `meeting` flow (issue #5) keeps publishing confirm-gated: it runs
+    # `process` with HUSHNOTE_SKIP_POST_SUMMARY_HOOK=1 so the automatic hook never
+    # fires here. Sourcing .hushnoterc in the child would re-populate
+    # POST_SUMMARY_HOOK, so a dedicated guard var (not settable from config) is the
+    # reliable suppressor. Return non-zero so the caller does NOT write .hook_done:
+    # the meeting is left "hook pending" and the UI (or a later explicit catchup)
+    # owns the publish decision. Nothing is published on this path.
+    if [ -n "${HUSHNOTE_SKIP_POST_SUMMARY_HOOK:-}" ]; then
+        log_info "Post-summary hook suppressed (interactive review will confirm publishing)"
+        return 1
+    fi
+
     if [ -z "$POST_SUMMARY_HOOK" ]; then
         return 0
     fi
@@ -1650,6 +1666,289 @@ except Exception:
 
     echo ""
     echo "Total: $total  |  Pending: $pending  |  Partial: $partial  |  Done (local): $done_local  |  Done (uploaded): $done_uploaded"
+}
+
+# --------------------------------------------------------------------------- #
+# Guided terminal flow (issue #5): record -> review -> confirm -> publish.
+#
+# Plain line-based prompts (read from /dev/tty, like record_audio.sh) so it works
+# over a bare SSH session and when stdout is a pipe — NOT a curses/ncurses TUI.
+# Recording, transcription and summarization reuse the existing record_meeting()
+# and `process` subcommand; this only adds orchestration, display and the confirm
+# gate. Publishing is confirm-gated PER TARGET and never automatic: the internal
+# `process` run is invoked with the automatic POST_SUMMARY_HOOK suppressed, and a
+# publisher runs only on an explicit per-target yes (empty/EOF answer -> NO).
+# --------------------------------------------------------------------------- #
+
+# Read one line from the controlling terminal. Echoes the entered text to stdout
+# (so command substitution captures the answer, while the prompt goes to the tty);
+# echoes nothing on EOF or when no terminal is available (piped / no tty), so
+# callers fail safe. Robust under `set -e`: the /dev/tty redirection is wrapped in
+# a group whose stderr is pre-silenced, so a failed open degrades to empty instead
+# of aborting the script.
+_ui_prompt() {
+    local __prompt="$1"
+    local __ans=""
+    { printf '%s' "$__prompt" >/dev/tty; } 2>/dev/null || return 0
+    { IFS= read -r __ans </dev/tty; }   2>/dev/null || return 0
+    printf '%s' "$__ans"
+}
+
+# Show a review file: page with less when interactive on a TTY, otherwise plain
+# cat (pipe / SSH without a tty / non-interactive). $1 = file to display.
+_ui_show_file() {
+    local __file="$1"
+    if [ -t 1 ] && command -v less >/dev/null 2>&1; then
+        less -R "$__file" </dev/tty || cat "$__file"
+    else
+        cat "$__file"
+    fi
+}
+
+meeting_ui() {
+    local duration=""
+    local title=""
+    local process_opts=()
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -t|--title)       title="$2"; shift 2 ;;
+            -d|--duration)    duration="$2"; shift 2 ;;
+            -m|--model)       process_opts+=(-m "$2"); shift 2 ;;
+            -l|--language)    process_opts+=(-l "$2"); shift 2 ;;
+            -o|--ollama)      process_opts+=(-o "$2"); shift 2 ;;
+            --initial-prompt) process_opts+=(--initial-prompt "$2"); shift 2 ;;
+            --hotwords)       process_opts+=(--hotwords "$2"); shift 2 ;;
+            --diarize)        process_opts+=(--diarize); shift ;;
+            -s|--speakers)    process_opts+=(-s "$2"); shift 2 ;;
+            -h|--help)
+                echo "Usage: $0 meeting [OPTIONS]"
+                echo ""
+                echo "Guided flow: record -> review -> edit title -> confirm -> publish."
+                echo "Publishing is confirm-gated per target and never automatic. Works"
+                echo "over SSH / a plain terminal (line prompts, no TUI)."
+                echo ""
+                echo "Options:"
+                echo "  -t, --title TITLE     Meeting title (prompted during recording if omitted)"
+                echo "  -d, --duration SEC    Auto-stop after SEC seconds (default: stop with Ctrl+C)"
+                echo "  -m, --model MODEL     Whisper model (tiny|base|small|medium|large-v3)"
+                echo "  -l, --language LANG   Language code (uk|ru|en|auto, default: auto-detect)"
+                echo "  -o, --ollama MODEL    Ollama model for summarization (default: ${OLLAMA_MODEL})"
+                echo "  --initial-prompt TEXT Decoding-bias sentence (overrides --hotwords)"
+                echo "  --hotwords TERMS      Space-separated tech terms to bias transcription"
+                echo "  --diarize             Enable speaker diarization"
+                echo "  -s, --speakers NUM    Number of speakers (requires --diarize)"
+                echo ""
+                echo "AUDIO_SOURCE_TYPE (env) selects capture mode (microphone|monitor|both|dual)."
+                return 0
+                ;;
+            *) shift ;;
+        esac
+    done
+
+    log_info "Guided meeting: record -> review -> confirm -> publish"
+    log_info "Publishing is confirm-gated; nothing is sent automatically."
+    echo ""
+
+    # Step 1: Record (reuses record_meeting; Ctrl+C or -d stops recording).
+    log_info "Step 1/4: Recording (press Ctrl+C to stop)..."
+    local recording_result_file="/tmp/hushnote_meeting_$$"
+    local record_args=()
+    [ -n "$duration" ] && record_args+=(-d "$duration")
+    [ -n "$title" ] && record_args+=(-t "$title")
+
+    local rec_exit=0
+    record_meeting "${record_args[@]}" > "$recording_result_file" || rec_exit=$?
+    log_debug "Recording exit code: $rec_exit"
+
+    local audio_file=""
+    if [ -f "$recording_result_file" ]; then
+        audio_file=$(cat "$recording_result_file")
+        rm -f "$recording_result_file"
+    fi
+
+    if [ -z "$audio_file" ] || [ ! -f "$audio_file" ]; then
+        log_error "Recording failed or produced no audio file"
+        return 1
+    fi
+    echo ""
+
+    # Resolve the meeting base (handles the dual-track voice/system pair, which
+    # detect_dual_tracks reduces to the shared base; single track just strips .wav).
+    local base
+    base=$(detect_dual_tracks "$audio_file")
+    [ -z "$base" ] && base="${audio_file%.*}"
+    local base_dir base_name
+    base_dir=$(dirname "$base")
+    base_name=$(basename "$base")
+    local summary_file="${base}_summary.md"
+    local metadata_file="${base}_metadata.json"
+    local hook_done_file="${base}.hook_done"
+
+    # Step 2: Transcribe + summarize via the EXISTING `process` subcommand, with
+    # the automatic post-summary hook SUPPRESSED so nothing publishes here. process
+    # auto-detects dual-track recordings, so this covers them too. Output is teed to
+    # a log so the detected language can be recovered for the review header even for
+    # single-track runs (which persist a .txt transcript but no language JSON); the
+    # interactive --diarize label prompt is unaffected because label.py reads
+    # /dev/tty, not this pipe.
+    log_info "Step 2/4: Transcribing and summarizing (auto-publish suppressed)..."
+    echo ""
+    local proc_log="/tmp/hushnote_meeting_proc_$$.log"
+    local proc_exit=0
+    set +e
+    HUSHNOTE_SKIP_POST_SUMMARY_HOOK=1 "$0" process "$audio_file" "${process_opts[@]}" 2>&1 | tee "$proc_log"
+    proc_exit=${PIPESTATUS[0]}
+    set -e
+    if [ "$proc_exit" -ne 0 ]; then
+        log_error "Processing failed (exit $proc_exit). Not publishing."
+        rm -f "$proc_log"
+        return 1
+    fi
+    if [ ! -f "$summary_file" ]; then
+        log_error "Summary not found after processing: $summary_file"
+        log_error "Summarization may have failed — not publishing."
+        rm -f "$proc_log"
+        return 1
+    fi
+    echo ""
+
+    # Step 3: Review — detected language + transcript + summary. Prefer the sibling
+    # transcription JSON (present for dual tracks); fall back to the 'Detected
+    # language:' line captured from the process log (single-track path).
+    local language
+    language=$(python3 "${SCRIPT_DIR}/meeting_ui.py" language "$base_dir" "$base_name" 2>/dev/null || echo "unknown")
+    if { [ "$language" = "unknown" ] || [ -z "$language" ]; } && [ -f "$proc_log" ]; then
+        local from_log
+        from_log=$(grep -a 'Detected language:' "$proc_log" 2>/dev/null | head -1 \
+            | sed -n 's/.*Detected language:[[:space:]]*\([A-Za-z][A-Za-z-]*\).*/\1/p') || from_log=""
+        [ -n "$from_log" ] && language="$from_log"
+    fi
+    [ -z "$language" ] && language="unknown"
+    rm -f "$proc_log"
+
+    local transcript_file="" cand
+    for cand in "${base}.txt" "${base}_trimmed.txt"; do
+        if [ -f "$cand" ]; then transcript_file="$cand"; break; fi
+    done
+
+    local review_file="/tmp/hushnote_review_$$"
+    {
+        echo "======================================================================"
+        echo " MEETING REVIEW"
+        echo "======================================================================"
+        echo "Detected language:  ${language}"
+        echo "Meeting:            ${base_name}"
+        echo "Summary file:       ${summary_file}"
+        echo ""
+        echo "----------------------------------------------------------------------"
+        echo " TRANSCRIPT"
+        echo "----------------------------------------------------------------------"
+        if [ -n "$transcript_file" ]; then
+            cat "$transcript_file"
+        else
+            echo "(transcript file not found)"
+        fi
+        echo ""
+        echo "----------------------------------------------------------------------"
+        echo " SUMMARY"
+        echo "----------------------------------------------------------------------"
+        cat "$summary_file"
+        echo ""
+    } > "$review_file"
+
+    log_info "Step 3/4: Review the meeting below (detected language: ${language})."
+    _ui_show_file "$review_file"
+    rm -f "$review_file"
+    echo ""
+
+    # Step 3b: Edit the meeting title, written into <base>_metadata.json so the
+    # publishers use the new value.
+    local current_title
+    current_title=$(python3 "${SCRIPT_DIR}/meeting_ui.py" get-title "$metadata_file" 2>/dev/null || echo "")
+    log_info "Current title: ${current_title:-(none)}"
+    local new_title
+    new_title=$(_ui_prompt "New title (blank = keep current): ")
+    if [ -n "$new_title" ]; then
+        if python3 "${SCRIPT_DIR}/meeting_ui.py" set-title "$metadata_file" "$new_title" >/dev/null; then
+            log_success "Title updated to: $new_title"
+        else
+            log_warn "Could not update title in metadata; keeping: ${current_title:-(none)}"
+        fi
+    fi
+    echo ""
+
+    # Step 4: Confirm-gated publishing, per configured target. A default / blank /
+    # EOF answer is treated as NO by meeting_ui.py confirm (fail safe).
+    log_info "Step 4/4: Publishing (explicit confirmation required per target)."
+    local targets=() line
+    while IFS= read -r line; do
+        [ -n "$line" ] && targets+=("$line")
+    done < <(python3 "${SCRIPT_DIR}/meeting_ui.py" targets 2>/dev/null)
+
+    if [ ${#targets[@]} -eq 0 ]; then
+        log_info "No publish target configured (set CONFLUENCE_BASE_URL and/or"
+        log_info "SLACK_WEBHOOK_URL / SLACK_BOT_TOKEN in .hushnoterc). Skipping publish."
+        echo ""
+        log_success "Guided meeting complete. Summary: $summary_file"
+        return 0
+    fi
+
+    # Targets are ordered confluence-then-slack (enabled_publishers), so Confluence
+    # is decided before Slack. This per-target loop invokes the publishers directly
+    # rather than via hooks/publish.py, so we reproduce that dispatcher's deferral
+    # gate inline: when Confluence was CONFIRMED but its publish did not yield a
+    # page id (it failed and no <base>.confluence_page_id marker exists), we skip
+    # Slack. Otherwise slack_publish.py would post a linkless message and latch
+    # <base>.slack_done, permanently dropping the Confluence link (issue #4's
+    # invariant). A DECLINED Confluence is different — the user asked for a
+    # Slack-only post — so it is not gated (confluence_confirmed stays false).
+    local target ans publisher rc
+    local confluence_confirmed=false confluence_rc=1
+    local confluence_marker="${base}.confluence_page_id"
+    for target in "${targets[@]}"; do
+        if [ "$target" = "slack" ] && [ "$confluence_confirmed" = true ] \
+           && [ "$confluence_rc" -ne 0 ] && [ ! -f "$confluence_marker" ]; then
+            log_warn "Skipping Slack: Confluence was confirmed but its publish failed and no"
+            log_warn "page link is available. Posting to Slack now would drop the Confluence"
+            log_warn "link permanently (the Slack post is one-shot). After Confluence recovers,"
+            log_warn "re-run the publishers directly to link them:"
+            log_warn "  ${SCRIPT_DIR}/hooks/confluence_publish.py \"$summary_file\""
+            log_warn "  ${SCRIPT_DIR}/hooks/slack_publish.py \"$summary_file\""
+            continue
+        fi
+        ans=$(_ui_prompt "Publish to ${target}? [y/N]: ")
+        if python3 "${SCRIPT_DIR}/meeting_ui.py" confirm "$ans"; then
+            case "$target" in
+                confluence) publisher="${SCRIPT_DIR}/hooks/confluence_publish.py" ;;
+                slack)      publisher="${SCRIPT_DIR}/hooks/slack_publish.py" ;;
+                *)          log_warn "Unknown publish target: $target"; continue ;;
+            esac
+            log_info "Publishing to ${target}..."
+            rc=0
+            "$publisher" "$summary_file" || rc=$?
+            [ "$target" = "confluence" ] && { confluence_confirmed=true; confluence_rc=$rc; }
+            if [ "$rc" -eq 0 ]; then
+                log_success "Published to ${target}."
+            else
+                log_error "Publishing to ${target} failed (exit $rc)."
+            fi
+        else
+            log_info "Skipped ${target} (not confirmed)."
+        fi
+    done
+
+    # Mark the meeting as handled by the guided flow. The internal `process` run
+    # suppressed the auto-hook and left no .hook_done marker, so without this a
+    # later `hushnote catchup` would treat the meeting as pending and auto-publish
+    # to EVERY configured target with no confirmation — overriding the per-target
+    # choices just made here (including an explicit "no"). Writing .hook_done tells
+    # catchup this meeting's publish decision is already settled. To (re)publish a
+    # target later, invoke its hook under hooks/ directly.
+    touch "$hook_done_file" 2>/dev/null || true
+
+    echo ""
+    log_success "Guided meeting complete. Summary: $summary_file"
 }
 
 # Main command dispatcher
@@ -2155,6 +2454,9 @@ main() {
         full)
             full_workflow "$@"
             ;;
+        meeting)
+            meeting_ui "$@"
+            ;;
         list)
             list_recordings
             ;;
@@ -2176,4 +2478,9 @@ main() {
     esac
 }
 
-main "$@"
+# Run main() only when executed directly. When sourced (BASH_SOURCE != $0) the
+# functions are defined without dispatching, so helpers such as the guided-flow
+# confirm gate can be driven non-interactively from a test harness.
+if [ "${BASH_SOURCE[0]}" = "${0}" ]; then
+    main "$@"
+fi

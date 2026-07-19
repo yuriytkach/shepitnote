@@ -38,6 +38,18 @@ Your system has these models ready for summarization:
 ./meeting-notes.sh full -o qwen2.5-coder:14b
 ```
 
+### Guided flow (review + confirm before publishing):
+```bash
+# Record -> review language/transcript/summary -> edit title -> confirm publish
+./hushnote meeting
+```
+`hushnote meeting` runs the whole loop but **never publishes automatically**: it
+shows the detected language, transcript and summary, lets you edit the title, and
+asks yes/no per configured target (Confluence / Slack) before sending. A blank
+answer or EOF means "do not publish". It uses plain line prompts, so it works over
+**SSH** and when output is piped. See the README ("Guided flow with review +
+confirm-gated publishing") for details.
+
 ### Available audio sources:
 You have several microphones detected:
 - **HD Pro Webcam C920** (ID: 98) - Webcam mic
@@ -147,6 +159,9 @@ section.
 
 # Summarize existing transcription
 ./meeting-notes.sh summarize path/to/transcript.txt -o qwen2.5-coder:14b
+
+# Guided flow: record, review, confirm-gated publish (SSH-friendly)
+./hushnote meeting
 ```
 
 ## Troubleshooting
@@ -181,8 +196,9 @@ hooks/confluence_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.
 ```
 
 See the [Confluence publishing](README.md#confluence-publishing) section of the README for
-the full setup (getting an API token, the page-title/idempotency behavior, and the note that
-confirm-gating arrives with the terminal UI, issue #5).
+the full setup (getting an API token, the page-title/idempotency behavior). For a per-meeting
+**confirm before publishing** instead of the automatic hook, use `./hushnote meeting`, which
+asks yes/no per target and never publishes on its own.
 
 ## Publishing summaries to Slack
 
@@ -200,4 +216,5 @@ To publish to **both** Confluence and Slack from the single hook slot, point
 have configured. See the [Slack publishing](README.md#slack-publishing) and
 [Publishing to both](README.md#publishing-to-both) sections of the README for the full setup
 (webhook vs bot token, the `.slack_done` de-dup marker, the Confluence-link-when-available
-behavior, and the note that confirm-gating arrives with the terminal UI, issue #5).
+behavior). For a per-meeting **confirm before publishing** instead of the automatic hook, use
+`./hushnote meeting`, which asks yes/no per target and never publishes on its own.

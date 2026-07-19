@@ -14,6 +14,7 @@ HushNote is a local-only, offline-capable voice transcription and meeting summar
 - **🤖 AI Summarization**: Generate structured meeting notes using Ollama — summary, discussion points, decisions, and action items (only when genuinely present)
 - **📋 Status & Catchup**: See which recordings are pending, partially processed, or complete; automatically process any that got missed
 - **🔗 Post-Summary Hook**: Run any script after summarization completes — upload to Outline, Notion, a webhook, or anything else
+- **🖥️ Guided Terminal Flow**: `hushnote meeting` walks record → review (language/transcript/summary) → edit title → confirm-gated publish to Confluence/Slack; nothing is sent without an explicit yes, and it works over SSH
 - **🔒 100% Private**: All processing happens locally — no internet required after setup
 - **⚡ GPU Acceleration**: AMD ROCm and NVIDIA CUDA supported, with automatic CPU fallback
 
@@ -264,6 +265,7 @@ Commands:
     apply-labels FILE   Apply labels to create final transcript
     compress FILE       Compress WAV to MP3
     full                Complete workflow: record, compress, trim, transcribe, summarize
+    meeting             Guided flow: record, review, edit title, confirm-publish
     process FILE        Process an existing recording (compress, trim, transcribe, summarize)
     process-last        Process the most recent recording
     list                List all recordings
@@ -305,6 +307,50 @@ Options:
 # Trim a recording manually (remove silent tail)
 ./hushnote trim recordings/meeting.mp3
 ```
+
+### Guided flow with review + confirm-gated publishing
+
+`hushnote meeting` runs the whole loop from a single command and, unlike `full`,
+**never publishes automatically** — every destination is confirmed by you first:
+
+```bash
+# Record -> review -> edit title -> confirm each publish target
+./hushnote meeting
+
+# Optional: pre-set the title, auto-stop after 1h, pick a model/language
+./hushnote meeting -t "Sprint planning" -d 3600 -m small -l en
+```
+
+What it does, in order:
+
+1. **Records** (stop with Ctrl+C, or `-d SECONDS`), reusing the normal record
+   path — dual-track (`AUDIO_SOURCE_TYPE=dual`) meetings work here too.
+2. **Transcribes and summarizes** by reusing the `process` pipeline, but with the
+   automatic `POST_SUMMARY_HOOK` **suppressed**, so nothing is sent yet.
+3. **Shows** the detected language, the full transcript and the generated summary
+   with clear section headers (paged with `less` when interactive; plain output
+   when piped or non-interactive).
+4. Lets you **edit the meeting title**, written back into `<base>_metadata.json`
+   so the publishers use the new value.
+5. For **each configured target** (Confluence if `CONFLUENCE_BASE_URL` is set,
+   Slack if `SLACK_WEBHOOK_URL` / `SLACK_BOT_TOKEN` is set) asks an explicit
+   yes/no and only publishes on `yes`. A blank answer, EOF, `n`, or anything that
+   is not an explicit yes means **do not publish** (fail-safe). If no target is
+   configured it says so and skips publishing. When **both** are configured,
+   Confluence is asked first; if you confirm Confluence but its publish fails
+   (no page link produced), Slack is **skipped** rather than posting a linkless
+   message that could never be back-filled with the link.
+
+It uses plain line prompts (read from `/dev/tty`, like the title prompt during
+recording) — **not** a curses TUI — so it works over a bare **SSH** session and
+when stdout is a pipe. The one-shot summarization or a failed publish is surfaced
+as a clear error rather than silently continuing.
+
+> Once you have made your per-target decision, the guided flow marks the meeting
+> handled (writes the `.hook_done` marker), so a later `catchup` will **not**
+> re-run the automatic hook on it and override your choices — an explicit "no"
+> stays "no". Your decision here is the authority for that meeting. To (re)publish
+> a target afterwards, invoke its publisher under `hooks/` directly.
 
 ### Dual-track (You/Remote) recording
 
@@ -437,11 +483,13 @@ hooks/confluence_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.
 
 Inspect the output, then set the `CONFLUENCE_*` config and let the hook publish for real.
 
-**Confirm-gating.** The interactive confirm step before a publish arrives with the terminal UI
-(issue #5), which does not exist yet. For now the hook simply publishes whenever it is invoked;
-enabling it is opt-in purely by setting `POST_SUMMARY_HOOK`. If a publish fails (missing config,
-API/network error) the hook exits non-zero, so hushnote does not write the `.hook_done` marker
-and retries it on the next `catchup`/`process`.
+**Confirm-gating.** When wired to `POST_SUMMARY_HOOK`, this publisher runs automatically after
+every summary — enabling it is opt-in purely by setting `POST_SUMMARY_HOOK`. If you want an
+interactive **confirm before each publish** instead, use
+[`./hushnote meeting`](#guided-flow-with-review--confirm-gated-publishing): it runs the same
+publisher only after an explicit per-target yes and never publishes on its own. If a publish
+fails (missing config, API/network error) the hook exits non-zero, so hushnote does not write the
+`.hook_done` marker and retries it on the next `catchup`/`process`.
 
 ### Slack publishing
 
@@ -491,8 +539,10 @@ hooks/slack_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.md --
 ```
 
 The bot token and webhook URL are never printed (redacted from every error and from the dry-run
-target line). As with Confluence, confirm-gating before a post arrives with the terminal UI (issue
-#5); for now the hook posts whenever it is invoked.
+target line). As with Confluence, the hook posts whenever it is invoked; for an interactive
+**confirm before each post**, use
+[`./hushnote meeting`](#guided-flow-with-review--confirm-gated-publishing), which asks yes/no per
+target and never posts on its own.
 
 ### Publishing to both
 
