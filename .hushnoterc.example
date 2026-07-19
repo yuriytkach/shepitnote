@@ -106,6 +106,13 @@
 # Example using the bundled Confluence publisher (issue #3, see the CONFLUENCE_*
 # block below and the README "Confluence publishing" section):
 #POST_SUMMARY_HOOK="${HOME}/path/to/hushnote/hooks/confluence_publish.py"
+#
+# Example publishing to BOTH Confluence (full notes) and Slack (short TL;DR):
+# point the hook at the bundled dispatcher, which runs each publisher that is
+# configured (Confluence first, so its page link is available to the Slack
+# message). See the SLACK_* block below and the README "Slack publishing" and
+# "Publishing to both" sections.
+#POST_SUMMARY_HOOK="${HOME}/path/to/hushnote/hooks/publish.py"
 
 # --- Confluence publishing (issue #3) -------------------------------------
 # Used only by hooks/confluence_publish.py (set POST_SUMMARY_HOOK above to it).
@@ -152,6 +159,49 @@
 # CONFLUENCE_DRY_RUN: set to 1 to force dry-run (same as the --dry-run flag) — the
 #   hook prints the storage XHTML and never calls the API.
 #CONFLUENCE_DRY_RUN=1
+# --------------------------------------------------------------------------
+
+# --- Slack publishing (issue #4) ------------------------------------------
+# Used by hooks/slack_publish.py (run it directly, or via hooks/publish.py to
+# publish to Slack AND Confluence in one hook). It runs a SECOND, terser Ollama
+# pass over the summary — a 3-5 bullet TL;DR plus action items, distinct from the
+# full notes — renders it as Slack mrkdwn, appends a link to the Confluence page
+# when one exists (from the <base>.confluence_page_id marker written by #3 +
+# CONFLUENCE_BASE_URL above), and posts it. The TL;DR pass reuses OLLAMA_MODEL /
+# OLLAMA_URL from above (falling back to the same llama3.1:8b / localhost:11434
+# defaults). See the README "Slack publishing" section for the full guide.
+#
+# Slack posts are NOT idempotent, so on a confirmed post the hook writes a
+# sibling <base>.slack_done marker and never re-posts for that meeting — retries
+# are safe (at most one message per meeting).
+#
+# NOTE: the hook posts whenever it is invoked. Confirm-gating before posting
+# arrives with the terminal UI (issue #5); for now enabling it is opt-in purely
+# by setting POST_SUMMARY_HOOK. Preview output first with the dry-run below.
+#
+# Preview without any token/webhook (prints the TL;DR + target + payload, no post;
+# still calls the local Ollama to build the TL;DR):
+#   hooks/slack_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.md --dry-run
+#
+# Pick ONE of the two auth/target styles:
+#
+# (A) Incoming webhook — the channel is baked into the webhook URL. Create one at
+#   https://api.slack.com/messaging/webhooks
+#   Keep it private; the webhook URL is a credential and is never printed.
+#SLACK_WEBHOOK_URL="https://hooks.slack.com/services/XXX/YYY/ZZZ"
+#
+# (B) Bot token — post via chat.postMessage to an explicit channel. Create a bot,
+#   give it chat:write, install it to the workspace, invite it to the channel.
+#SLACK_BOT_TOKEN="xoxb-your-bot-token"
+#SLACK_CHANNEL="#meetings"
+#
+# Optional:
+# SLACK_AUTH_MODE: force "webhook" or "bot". When unset it is derived from which
+#   of the above is set (both set -> webhook wins).
+#SLACK_AUTH_MODE="webhook"
+#
+# SLACK_DRY_RUN: set to 1 to force dry-run (same as the --dry-run flag).
+#SLACK_DRY_RUN=1
 # --------------------------------------------------------------------------
 
 # Notification command override. By default hushnote uses dunstify (if available)

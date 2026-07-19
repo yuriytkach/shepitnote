@@ -183,3 +183,21 @@ hooks/confluence_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.
 See the [Confluence publishing](README.md#confluence-publishing) section of the README for
 the full setup (getting an API token, the page-title/idempotency behavior, and the note that
 confirm-gating arrives with the terminal UI, issue #5).
+
+## Publishing summaries to Slack
+
+To post a short TL;DR of each summary to Slack, point `POST_SUMMARY_HOOK` at the bundled
+`hooks/slack_publish.py` and set either `SLACK_WEBHOOK_URL` (incoming webhook) or
+`SLACK_BOT_TOKEN` + `SLACK_CHANNEL` (bot token) in `.hushnoterc`. Preview first — no token
+needed (it still calls the local Ollama to build the TL;DR):
+
+```bash
+hooks/slack_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.md --dry-run
+```
+
+To publish to **both** Confluence and Slack from the single hook slot, point
+`POST_SUMMARY_HOOK` at the dispatcher `hooks/publish.py` instead; it runs each publisher you
+have configured. See the [Slack publishing](README.md#slack-publishing) and
+[Publishing to both](README.md#publishing-to-both) sections of the README for the full setup
+(webhook vs bot token, the `.slack_done` de-dup marker, the Confluence-link-when-available
+behavior, and the note that confirm-gating arrives with the terminal UI, issue #5).

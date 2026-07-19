@@ -443,6 +443,75 @@ enabling it is opt-in purely by setting `POST_SUMMARY_HOOK`. If a publish fails 
 API/network error) the hook exits non-zero, so hushnote does not write the `.hook_done` marker
 and retries it on the next `catchup`/`process`.
 
+### Slack publishing
+
+HushNote ships a second post-summary hook, `hooks/slack_publish.py`, that posts a **short**
+summary of each meeting to Slack (issue #4). It runs a distinct, terser second Ollama pass over
+the summary — a 3-5 bullet TL;DR plus action items, separate from the full notes — renders it as
+Slack mrkdwn, appends a link to the Confluence page when one exists, and posts it via an incoming
+webhook or a bot token. Point `POST_SUMMARY_HOOK` at it to enable Slack only:
+
+```bash
+# In .hushnoterc:
+POST_SUMMARY_HOOK="${HOME}/path/to/hushnote/hooks/slack_publish.py"
+```
+
+The TL;DR pass reuses the same `OLLAMA_MODEL` / `OLLAMA_URL` as the main summary (falling back to
+the same `llama3.1:8b` / `http://localhost:11434` defaults), so Ollama must be running.
+
+**Configuration** (all read from the environment; set them in `.hushnoterc`, which is sourced
+before the hook runs — see `.hushnoterc.example` for the annotated block). Pick **one** of the two
+auth styles:
+
+| Variable | Required | Purpose |
+| --- | --- | --- |
+| `SLACK_WEBHOOK_URL` | webhook mode | [Incoming webhook](https://api.slack.com/messaging/webhooks) URL; the channel is baked into it (a credential, never printed) |
+| `SLACK_BOT_TOKEN` | bot mode | Bot token (`xoxb-…`) with `chat:write`; posts via `chat.postMessage` (a credential, never printed) |
+| `SLACK_CHANNEL` | bot mode | Target channel for bot mode, e.g. `#meetings` |
+| `SLACK_AUTH_MODE` | no | Force `webhook` or `bot`; otherwise derived from which of the above is set (both set -> webhook wins) |
+| `SLACK_DRY_RUN` | no | `=1` forces dry-run (same as `--dry-run`) |
+
+**No double-posting.** Slack messages are not idempotent (each POST creates a new message), so on a
+confirmed post the hook writes a sibling `<base>.slack_done` marker and, on any later invocation,
+**no-ops when that marker exists**. Because the hook is retried whenever it exits non-zero, this is
+what keeps a retry from posting the same meeting twice — at most one Slack message per meeting.
+
+**Confluence link when available.** If the Confluence publisher has already run for the meeting, it
+leaves a sibling `<base>.confluence_page_id` marker; the Slack hook reads it and (with
+`CONFLUENCE_BASE_URL` set) appends a `Full meeting notes on Confluence` link built as
+`{CONFLUENCE_BASE_URL}/pages/viewpage.action?pageId=<id>` (works on Cloud and Server/DC). With no
+marker or base URL the link is omitted gracefully and the message still posts.
+
+**Dry-run — preview before posting.** Run the hook with `--dry-run` (needs no token/webhook) to
+resolve the target and print the short summary and the exact payload without posting. It still
+calls the local Ollama to build the real TL;DR:
+
+```bash
+hooks/slack_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.md --dry-run
+```
+
+The bot token and webhook URL are never printed (redacted from every error and from the dry-run
+target line). As with Confluence, confirm-gating before a post arrives with the terminal UI (issue
+#5); for now the hook posts whenever it is invoked.
+
+### Publishing to both
+
+There is only one `POST_SUMMARY_HOOK` slot, so to publish the **full notes to Confluence and the
+short TL;DR to Slack** point it at the bundled dispatcher, `hooks/publish.py`:
+
+```bash
+# In .hushnoterc (with the CONFLUENCE_* and SLACK_* blocks both filled in):
+POST_SUMMARY_HOOK="${HOME}/path/to/hushnote/hooks/publish.py"
+```
+
+The dispatcher runs each publisher that is configured — Confluence when `CONFLUENCE_BASE_URL` is
+set, Slack when `SLACK_WEBHOOK_URL` or `SLACK_BOT_TOKEN` is set — **Confluence first**, so its page
+link is available to the Slack message in the same run. Each publisher is independently idempotent
+(Confluence updates the same page; Slack skips on its `.slack_done` marker), so a retry after a
+partial failure re-runs only what failed and never duplicates. The dispatcher exits non-zero if any
+enabled publisher failed (so hushnote retries), and the standalone publishers remain directly
+invokable for one-destination setups.
+
 ## Troubleshooting
 
 **No audio captured:**
