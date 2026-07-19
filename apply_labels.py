@@ -219,7 +219,7 @@ def main():
         # Show next step
         if args.format in ["txt", "md"]:
             print(f"\nNext step:", file=sys.stderr)
-            print(f"  ./hushnote summarize {output_file}", file=sys.stderr)
+            print(f"  ./shepitnote summarize {output_file}", file=sys.stderr)
 
     except Exception as e:
         print(f"Error applying labels: {e}", file=sys.stderr)

@@ -3,7 +3,7 @@
 """
 Post-summary hook: post a SHORT meeting summary to Slack (issue #4).
 
-hushnote's run_post_summary_hook invokes this as:
+shepitnote's run_post_summary_hook invokes this as:
 
     hooks/slack_publish.py <base>_summary.md
 
@@ -20,14 +20,14 @@ sibling <base>.slack_done marker and, on any later invocation, no-ops when that
 marker already exists. That makes hook retries safe: at most one Slack message
 per meeting regardless of how many times the hook is re-run.
 
-All configuration and secrets come from SLACK_* environment variables (hushnote
-sources .hushnoterc before invoking the hook). The bot token and webhook URL are
+All configuration and secrets come from SLACK_* environment variables (shepitnote
+sources .shepitnoterc before invoking the hook). The bot token and webhook URL are
 never printed (redacted from every error). The TL;DR pass reuses the same
 OLLAMA_MODEL / OLLAMA_URL as summarize.py (falling back to its defaults, since
-hushnote does not export those vars when the user relies on defaults).
+shepitnote does not export those vars when the user relies on defaults).
 
 The hook exits 0 only on a successful post (or a dry-run, or an already-posted
-no-op) and non-zero on any missing-config / Ollama / Slack API error, so hushnote
+no-op) and non-zero on any missing-config / Ollama / Slack API error, so shepitnote
 does not write the .hook_done marker and retries the hook next catchup/process.
 
 Dry-run (--dry-run or SLACK_DRY_RUN=1) resolves everything and prints the short
@@ -67,7 +67,7 @@ resolve_meeting_time = _cp.resolve_meeting_time
 
 DEFAULT_TIMEOUT = 30  # seconds, per Slack HTTP request
 
-# Same defaults as summarize.py — hushnote does not export OLLAMA_MODEL/OLLAMA_URL
+# Same defaults as summarize.py — shepitnote does not export OLLAMA_MODEL/OLLAMA_URL
 # when the user relies on the defaults (they are assigned after `set +a`), so the
 # hook must fall back to these or it would send an empty model.
 DEFAULT_OLLAMA_MODEL = "llama3.1:8b"
@@ -314,8 +314,8 @@ def validate_required(cfg):
     if mode is None:
         raise ConfigError(
             "No Slack target configured. Set SLACK_WEBHOOK_URL (incoming webhook) "
-            "or SLACK_BOT_TOKEN + SLACK_CHANNEL (bot token) in .hushnoterc "
-            "(see .hushnoterc.example)."
+            "or SLACK_BOT_TOKEN + SLACK_CHANNEL (bot token) in .shepitnoterc "
+            "(see .shepitnoterc.example)."
         )
     if mode == "webhook":
         missing = [] if cfg["webhook_url"] else ["SLACK_WEBHOOK_URL"]
@@ -329,7 +329,7 @@ def validate_required(cfg):
         raise ConfigError(
             f"Missing required Slack configuration for {mode} mode: "
             + ", ".join(missing)
-            + ". Set these in .hushnoterc (see .hushnoterc.example)."
+            + ". Set these in .shepitnoterc (see .shepitnoterc.example)."
         )
 
 
@@ -422,7 +422,7 @@ def post_to_slack(cfg, payload):
 
 def main(argv=None, ollama_fn=None):
     parser = argparse.ArgumentParser(
-        description="Post a short HushNote meeting summary to Slack (post-summary hook)."
+        description="Post a short ShepitNote meeting summary to Slack (post-summary hook)."
     )
     parser.add_argument("summary_file", help="Path to the <base>_summary.md file")
     parser.add_argument(
@@ -487,7 +487,7 @@ def main(argv=None, ollama_fn=None):
         )
     except SystemExit:
         # summarize.query_ollama does sys.exit(1) on an Ollama error; surface it as
-        # a non-zero hook exit (so hushnote retries) rather than exiting the process.
+        # a non-zero hook exit (so shepitnote retries) rather than exiting the process.
         print("Error: Ollama TL;DR generation failed (see message above).", file=sys.stderr)
         return 1
     except Exception as e:

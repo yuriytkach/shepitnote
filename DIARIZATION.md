@@ -1,6 +1,6 @@
 # Speaker Diarization Guide
 
-**HushNote** now supports speaker diarization - identifying "who spoke when" in your meeting recordings.
+**ShepitNote** now supports speaker diarization - identifying "who spoke when" in your meeting recordings.
 
 ## Overview
 
@@ -25,7 +25,7 @@ Speaker diarization adds speaker labels to transcriptions, making it easy to see
 
 ```bash
 # Record, diarize, transcribe, label, and summarize
-./hushnote full --diarize --speakers 3 -m small -o mistral:7b
+./shepitnote full --diarize --speakers 3 -m small -o mistral:7b
 
 # The workflow will:
 # 1. Record audio
@@ -41,26 +41,26 @@ Speaker diarization adds speaker labels to transcriptions, making it easy to see
 
 ```bash
 # 1. Record a meeting
-./hushnote record -d 1800  # 30 minutes
+./shepitnote record -d 1800  # 30 minutes
 
 # 2. Identify speakers (diarization)
-./hushnote diarize recordings/meeting_20251005_143022.wav --speakers 3
+./shepitnote diarize recordings/meeting_20251005_143022.wav --speakers 3
 
 # 3. Transcribe the audio
-./hushnote transcribe recordings/meeting_20251005_143022.wav -m small
+./shepitnote transcribe recordings/meeting_20251005_143022.wav -m small
 
-# 4. Merge diarization + transcription (done automatically by hushnote)
+# 4. Merge diarization + transcription (done automatically by shepitnote)
 ./merge_diarization.py recordings/meeting_20251005_143022_speakers.json \
                        recordings/meeting_20251005_143022.json
 
 # 5. Label speakers interactively
-./hushnote label recordings/meeting_20251005_143022_diarized.json
+./shepitnote label recordings/meeting_20251005_143022_diarized.json
 
 # 6. Apply labels to create final transcript
-./hushnote apply-labels recordings/meeting_20251005_143022_speakers_labeled.json
+./shepitnote apply-labels recordings/meeting_20251005_143022_speakers_labeled.json
 
 # 7. Summarize (optional)
-./hushnote summarize recordings/meeting_20251005_143022.txt
+./shepitnote summarize recordings/meeting_20251005_143022.txt
 ```
 
 ## Setup
@@ -99,10 +99,10 @@ echo 'export HF_TOKEN="your_token_here"' >> ~/.bashrc
 
 ```bash
 # Record interview
-./hushnote record -d 3600
+./shepitnote record -d 3600
 
 # Diarize with 2 speakers
-./hushnote full --diarize --speakers 2 -m medium
+./shepitnote full --diarize --speakers 2 -m medium
 
 # Interactive labeling shows:
 # SPEAKER_00: "Thanks for joining me today..."
@@ -118,10 +118,10 @@ echo 'export HF_TOKEN="your_token_here"' >> ~/.bashrc
 
 ```bash
 # Record team meeting
-./hushnote record
+./shepitnote record
 
 # Auto-detect number of speakers
-./hushnote full --diarize -m small
+./shepitnote full --diarize -m small
 
 # Label each speaker:
 # SPEAKER_00 → "Alice" (Product Manager)
@@ -134,19 +134,19 @@ echo 'export HF_TOKEN="your_token_here"' >> ~/.bashrc
 
 ```bash
 # You already have a recording
-./hushnote diarize old_meeting.wav --speakers 4
-./hushnote transcribe old_meeting.wav -m base
+./shepitnote diarize old_meeting.wav --speakers 4
+./shepitnote transcribe old_meeting.wav -m base
 ./merge_diarization.py old_meeting_speakers.json old_meeting.json
-./hushnote label old_meeting_diarized.json
-./hushnote apply-labels old_meeting_speakers_labeled.json -f md
+./shepitnote label old_meeting_diarized.json
+./shepitnote apply-labels old_meeting_speakers_labeled.json -f md
 ```
 
 ## Interactive Labeling
 
-When you run `./hushnote label`, you'll see:
+When you run `./shepitnote label`, you'll see:
 
 ```
-HushNote Speaker Labeling
+ShepitNote Speaker Labeling
 ══════════════════════════════════════════════════════════════════
 
 Found 3 speakers in meeting_20251005_143022.wav
@@ -235,7 +235,7 @@ Who is SPEAKER_01? Bob Smith
 
 ## File Organization
 
-After running `./hushnote full --diarize`, you'll have:
+After running `./shepitnote full --diarize`, you'll have:
 
 ```
 recordings/
@@ -250,7 +250,7 @@ recordings/
 
 ## Commands Reference
 
-### `./hushnote diarize FILE [OPTIONS]`
+### `./shepitnote diarize FILE [OPTIONS]`
 
 Identify speakers in an audio file.
 
@@ -263,25 +263,25 @@ Identify speakers in an audio file.
 **Examples:**
 ```bash
 # Auto-detect speakers
-./hushnote diarize meeting.wav
+./shepitnote diarize meeting.wav
 
 # Expect 3 speakers
-./hushnote diarize meeting.wav --speakers 3
+./shepitnote diarize meeting.wav --speakers 3
 
 # Detect 2-5 speakers
-./hushnote diarize meeting.wav --min-speakers 2 --max-speakers 5
+./shepitnote diarize meeting.wav --min-speakers 2 --max-speakers 5
 ```
 
-### `./hushnote label FILE`
+### `./shepitnote label FILE`
 
 Interactively label speakers with their names.
 
 **Examples:**
 ```bash
-./hushnote label recordings/meeting_20251005_143022_diarized.json
+./shepitnote label recordings/meeting_20251005_143022_diarized.json
 ```
 
-### `./hushnote apply-labels FILE [OPTIONS]`
+### `./shepitnote apply-labels FILE [OPTIONS]`
 
 Apply speaker labels to create final transcript.
 
@@ -292,16 +292,16 @@ Apply speaker labels to create final transcript.
 **Examples:**
 ```bash
 # Create text transcript
-./hushnote apply-labels meeting_speakers_labeled.json
+./shepitnote apply-labels meeting_speakers_labeled.json
 
 # Create markdown
-./hushnote apply-labels meeting_speakers_labeled.json -f md
+./shepitnote apply-labels meeting_speakers_labeled.json -f md
 
 # Create SRT subtitles
-./hushnote apply-labels meeting_speakers_labeled.json -f srt
+./shepitnote apply-labels meeting_speakers_labeled.json -f srt
 ```
 
-### `./hushnote full --diarize [OPTIONS]`
+### `./shepitnote full --diarize [OPTIONS]`
 
 Complete workflow with speaker diarization.
 
@@ -315,13 +315,13 @@ Complete workflow with speaker diarization.
 **Examples:**
 ```bash
 # Full workflow with diarization
-./hushnote full --diarize --speakers 3 -m small -o mistral:7b
+./shepitnote full --diarize --speakers 3 -m small -o mistral:7b
 
 # Auto-detect speakers
-./hushnote full --diarize -m base
+./shepitnote full --diarize -m base
 
 # 1-hour recording with diarization
-./hushnote full --diarize -d 3600 -m medium
+./shepitnote full --diarize -d 3600 -m medium
 ```
 
 ## Performance
@@ -350,7 +350,7 @@ The speaker label format is designed for future integration with meeting platfor
 
 ```bash
 # Future feature (not yet implemented)
-./hushnote full --diarize --zoom-meeting-id 123456789
+./shepitnote full --diarize --zoom-meeting-id 123456789
 
 # Will automatically:
 # - Fetch participant names from Zoom API
@@ -362,7 +362,7 @@ The speaker label format is designed for future integration with meeting platfor
 
 ```bash
 # Future feature (not yet implemented)
-./hushnote full --diarize --teams-meeting-url "https://..."
+./shepitnote full --diarize --teams-meeting-url "https://..."
 
 # Will automatically label speakers from Teams participant list
 ```
@@ -496,9 +496,9 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
 
 ## Support
 
-- **Issues**: [GitHub Issues](https://github.com/peteonrails/hushnote/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/peteonrails/hushnote/discussions)
+- **Issues**: [GitHub Issues](https://github.com/yuriytkach/shepitnote/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yuriytkach/shepitnote/discussions)
 
 ---
 
-**HushNote** - Privacy-first meeting transcription with speaker diarization. 🤫
+**ShepitNote** - Privacy-first meeting transcription with speaker diarization. 🤫

@@ -8,7 +8,7 @@ set -euo pipefail
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
 # Load config file if it exists
-CONFIG_FILE="${SCRIPT_DIR}/.hushnoterc"
+CONFIG_FILE="${SCRIPT_DIR}/.shepitnoterc"
 if [ -f "$CONFIG_FILE" ]; then
     # Source the config file
     set -a  # Export all variables
@@ -200,7 +200,7 @@ record_meeting() {
 
     # Run recording and capture output file path
     # Use temp file to avoid command substitution exit on CTRL-C
-    local record_result_file="/tmp/hushnote_record_$$"
+    local record_result_file="/tmp/shepitnote_record_$$"
     local record_exit_code=0
 
     "${SCRIPT_DIR}/record_audio.sh" "${record_args[@]}" > "$record_result_file" || record_exit_code=$?
@@ -493,7 +493,7 @@ full_workflow() {
 
     # Record the audio
     # Use a temporary file to communicate the recording path
-    local recording_result_file="/tmp/hushnote_recording_$$"
+    local recording_result_file="/tmp/shepitnote_recording_$$"
     local recording_exit_code=0
 
     # Build record_meeting arguments
@@ -1379,7 +1379,7 @@ run_post_summary_hook() {
 
     # The guided `meeting` flow (issue #5) keeps publishing confirm-gated: it runs
     # `process` with HUSHNOTE_SKIP_POST_SUMMARY_HOOK=1 so the automatic hook never
-    # fires here. Sourcing .hushnoterc in the child would re-populate
+    # fires here. Sourcing .shepitnoterc in the child would re-populate
     # POST_SUMMARY_HOOK, so a dedicated guard var (not settable from config) is the
     # reliable suppressor. Return non-zero so the caller does NOT write .hook_done:
     # the meeting is left "hook pending" and the UI (or a later explicit catchup)
@@ -1752,7 +1752,7 @@ meeting_ui() {
 
     # Step 1: Record (reuses record_meeting; Ctrl+C or -d stops recording).
     log_info "Step 1/4: Recording (press Ctrl+C to stop)..."
-    local recording_result_file="/tmp/hushnote_meeting_$$"
+    local recording_result_file="/tmp/shepitnote_meeting_$$"
     local record_args=()
     [ -n "$duration" ] && record_args+=(-d "$duration")
     [ -n "$title" ] && record_args+=(-t "$title")
@@ -1794,7 +1794,7 @@ meeting_ui() {
     # /dev/tty, not this pipe.
     log_info "Step 2/4: Transcribing and summarizing (auto-publish suppressed)..."
     echo ""
-    local proc_log="/tmp/hushnote_meeting_proc_$$.log"
+    local proc_log="/tmp/shepitnote_meeting_proc_$$.log"
     local proc_exit=0
     set +e
     HUSHNOTE_SKIP_POST_SUMMARY_HOOK=1 "$0" process "$audio_file" "${process_opts[@]}" 2>&1 | tee "$proc_log"
@@ -1832,7 +1832,7 @@ meeting_ui() {
         if [ -f "$cand" ]; then transcript_file="$cand"; break; fi
     done
 
-    local review_file="/tmp/hushnote_review_$$"
+    local review_file="/tmp/shepitnote_review_$$"
     {
         echo "======================================================================"
         echo " MEETING REVIEW"
@@ -1888,7 +1888,7 @@ meeting_ui() {
 
     if [ ${#targets[@]} -eq 0 ]; then
         log_info "No publish target configured (set CONFLUENCE_BASE_URL and/or"
-        log_info "SLACK_WEBHOOK_URL / SLACK_BOT_TOKEN in .hushnoterc). Skipping publish."
+        log_info "SLACK_WEBHOOK_URL / SLACK_BOT_TOKEN in .shepitnoterc). Skipping publish."
         echo ""
         log_success "Guided meeting complete. Summary: $summary_file"
         return 0
@@ -1940,7 +1940,7 @@ meeting_ui() {
 
     # Mark the meeting as handled by the guided flow. The internal `process` run
     # suppressed the auto-hook and left no .hook_done marker, so without this a
-    # later `hushnote catchup` would treat the meeting as pending and auto-publish
+    # later `shepitnote catchup` would treat the meeting as pending and auto-publish
     # to EVERY configured target with no confirmation — overriding the per-target
     # choices just made here (including an explicit "no"). Writing .hook_done tells
     # catchup this meeting's publish decision is already settled. To (re)publish a

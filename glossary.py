@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Per-language term glossary for HushNote (issue #8).
+Per-language term glossary for ShepitNote (issue #8).
 
 Meetings mix Russian and Ukrainian speech with embedded English tech terms
 (Kubernetes, deploy, Helm chart, ...). Whisper frequently renders those English

@@ -18,7 +18,7 @@ It's built for meetings that mix **Ukrainian, Russian, and English** (with Engli
 - **🤖 AI Summarization**: Generate structured meeting notes using Ollama — summary, discussion points, decisions, and action items (only when genuinely present)
 - **📋 Status & Catchup**: See which recordings are pending, partially processed, or complete; automatically process any that got missed
 - **🔗 Post-Summary Hook**: Run any script after summarization completes — upload to Outline, Notion, a webhook, or anything else
-- **🖥️ Guided Terminal Flow**: `hushnote meeting` walks record → review (language/transcript/summary) → edit title → confirm-gated publish to Confluence/Slack; nothing is sent without an explicit yes, and it works over SSH
+- **🖥️ Guided Terminal Flow**: `shepitnote meeting` walks record → review (language/transcript/summary) → edit title → confirm-gated publish to Confluence/Slack; nothing is sent without an explicit yes, and it works over SSH
 - **🔒 100% Private**: All processing happens locally — no internet required after setup
 - **⚡ CPU-first, GPU-optional**: runs on CPU by default (fast on modern multi-core CPUs) and uses an NVIDIA GPU automatically when present, with CPU fallback on out-of-memory. faster-whisper has no AMD/ROCm backend, so on AMD systems transcription runs on CPU — GPU acceleration there (whisper.cpp + Vulkan) is on the roadmap
 
@@ -35,8 +35,8 @@ It's built for meetings that mix **Ukrainian, Russian, and English** (with Engli
 ### Quick Install
 
 ```bash
-git clone https://github.com/yuriytkach/yt-hushnote.git
-cd yt-hushnote
+git clone https://github.com/yuriytkach/shepitnote.git
+cd shepitnote
 
 # Create a virtual environment
 python -m venv venv
@@ -55,7 +55,7 @@ curl -fsSL https://ollama.com/install.sh | sh
 ollama pull llama3.1:8b
 
 # Test installation
-./hushnote --help
+./shepitnote --help
 ```
 
 **System dependencies — Debian / Ubuntu / KDE neon:**
@@ -72,13 +72,13 @@ yay -S ffmpeg pulseaudio-utils python  # PulseAudio
 
 ## Configuration
 
-Copy `.hushnoterc.example` to `.hushnoterc` and edit to your needs:
+Copy `.shepitnoterc.example` to `.shepitnoterc` and edit to your needs:
 
 ```bash
-cp .hushnoterc.example .hushnoterc
+cp .shepitnoterc.example .shepitnoterc
 ```
 
-`.hushnoterc` is sourced at startup and ignored by git. The example file documents every available option with defaults and comments, including audio backend, Whisper model, Ollama model, silent tail trimming thresholds, and the post-summary hook.
+`.shepitnoterc` is sourced at startup and ignored by git. The example file documents every available option with defaults and comments, including audio backend, Whisper model, Ollama model, silent tail trimming thresholds, and the post-summary hook.
 
 ### Whisper Models
 
@@ -112,13 +112,13 @@ For a known-language meeting, set the language explicitly rather than relying on
 auto-detect:
 
 ```bash
-./hushnote full -l uk     # force Ukrainian
-./hushnote full -l ru     # force Russian
-./hushnote full -l en     # force English
-./hushnote full -l auto   # auto-detect (same as leaving it unset)
+./shepitnote full -l uk     # force Ukrainian
+./shepitnote full -l ru     # force Russian
+./shepitnote full -l en     # force English
+./shepitnote full -l auto   # auto-detect (same as leaving it unset)
 ```
 
-Set a permanent default in `.hushnoterc`:
+Set a permanent default in `.shepitnoterc`:
 
 ```bash
 WHISPER_LANGUAGE=uk       # or ru / en / auto (auto or empty = auto-detect)
@@ -141,8 +141,8 @@ or in CI. To pick your defaults, take 2-3 representative clips of your meetings
 and compare, for each:
 
 ```bash
-./hushnote transcribe clip.wav -l auto   # what auto-detect produces
-./hushnote transcribe clip.wav -l uk     # explicit language (uk/ru/en)
+./shepitnote transcribe clip.wav -l auto   # what auto-detect produces
+./shepitnote transcribe clip.wav -l uk     # explicit language (uk/ru/en)
 ```
 
 Check both transcripts against what was actually said. If `-l auto` sometimes
@@ -166,13 +166,13 @@ team uses so decoding is biased toward the correct spellings:
 
 ```bash
 # One-off:
-./hushnote process meeting.wav --hotwords "Kubernetes deploy Helm chart Jenkins GitHub Postgres Grafana"
+./shepitnote process meeting.wav --hotwords "Kubernetes deploy Helm chart Jenkins GitHub Postgres Grafana"
 
 # Or a sentence-form bias (takes precedence over hotwords):
-./hushnote process meeting.wav --initial-prompt "We discuss Kubernetes, deploys, Helm charts, Jenkins, GitHub, Postgres and Grafana."
+./shepitnote process meeting.wav --initial-prompt "We discuss Kubernetes, deploys, Helm charts, Jenkins, GitHub, Postgres and Grafana."
 ```
 
-Set permanent defaults in `.hushnoterc`:
+Set permanent defaults in `.shepitnoterc`:
 
 ```bash
 WHISPER_HOTWORDS="Kubernetes deploy Helm chart Jenkins GitHub Postgres Grafana"
@@ -190,7 +190,7 @@ bias can cause hallucinated insertions of the seeded terms.
 Whatever Whisper still renders phonetically is normalized by a glossary applied
 to the transcript **before** the summary is generated (so every path — simple,
 diarized, and dual — benefits). Glossary files live in `GLOSSARY_DIR` (default:
-the hushnote directory):
+the shepitnote directory):
 
 | File | Applied to |
 |------|------------|
@@ -210,7 +210,7 @@ may list phonetic variants separated by `|`; matching is case-insensitive
 хелм чарт => helm chart
 ```
 
-Ship templates live next to `hushnote` as `glossary*.txt.example`. Copy one and
+Ship templates live next to `shepitnote` as `glossary*.txt.example`. Copy one and
 edit it to activate (real `glossary.*.txt` files are git-ignored, so they stay
 private automatically):
 
@@ -243,9 +243,9 @@ measured for you or in CI. To verify on a real mixed-language clip:
 
 1. Pick one clip with mixed uk/ru speech **and** several English tech terms
    (Kubernetes, deploy, Helm chart, Jenkins).
-2. **Baseline (feature off):** ensure `.hushnoterc` has no `WHISPER_HOTWORDS` /
+2. **Baseline (feature off):** ensure `.shepitnoterc` has no `WHISPER_HOTWORDS` /
    `WHISPER_INITIAL_PROMPT` and no real `glossary.*.txt`, then run
-   `./hushnote process clip.wav -l uk`. Save the transcript and summary.
+   `./shepitnote process clip.wav -l uk`. Save the transcript and summary.
 3. **Enable:** set `WHISPER_HOTWORDS="Kubernetes deploy Helm chart Jenkins ..."`
    (tailor to your stack) and `cp glossary.uk.txt.example glossary.uk.txt` (edit
    for your terms; also `glossary.ru.txt` / shared `glossary.txt` as needed).
@@ -301,32 +301,32 @@ Options:
 
 ```bash
 # Record a meeting, stop with Ctrl+C — automatically compresses, trims, transcribes, summarizes
-./hushnote full
+./shepitnote full
 
 # Check status of all recordings
-./hushnote status
+./shepitnote status
 
 # Process any recordings that were interrupted or missed
-./hushnote catchup
+./shepitnote catchup
 
 # Process a recording you already have
-./hushnote process recordings/meeting.wav
+./shepitnote process recordings/meeting.wav
 
 # Trim a recording manually (remove silent tail)
-./hushnote trim recordings/meeting.mp3
+./shepitnote trim recordings/meeting.mp3
 ```
 
 ### Guided flow with review + confirm-gated publishing
 
-`hushnote meeting` runs the whole loop from a single command and, unlike `full`,
+`shepitnote meeting` runs the whole loop from a single command and, unlike `full`,
 **never publishes automatically** — every destination is confirmed by you first:
 
 ```bash
 # Record -> review -> edit title -> confirm each publish target
-./hushnote meeting
+./shepitnote meeting
 
 # Optional: pre-set the title, auto-stop after 1h, pick a model/language
-./hushnote meeting -t "Sprint planning" -d 3600 -m small -l en
+./shepitnote meeting -t "Sprint planning" -d 3600 -m small -l en
 ```
 
 What it does, in order:
@@ -367,7 +367,7 @@ For calls where you want reliable "who said what" without diarization, set
 single command — your microphone (You) and the system sink monitor (Remote):
 
 ```bash
-AUDIO_SOURCE_TYPE=dual ./hushnote full
+AUDIO_SOURCE_TYPE=dual ./shepitnote full
 ```
 
 This produces `meeting_TS.voice.wav` (You) and `meeting_TS.system.wav` (Remote).
@@ -435,14 +435,14 @@ they were recorded):
 
 ## Post-Summary Hook
 
-Set `POST_SUMMARY_HOOK` in `.hushnoterc` to run a script after every summary is created. The script receives the summary file path as `$1`. On success, hushnote writes a `.hook_done` marker so `catchup` knows not to re-run it.
+Set `POST_SUMMARY_HOOK` in `.shepitnoterc` to run a script after every summary is created. The script receives the summary file path as `$1`. On success, shepitnote writes a `.hook_done` marker so `catchup` knows not to re-run it.
 
 ```bash
-# In .hushnoterc:
+# In .shepitnoterc:
 POST_SUMMARY_HOOK="${HOME}/.local/bin/my-upload-script"
 ```
 
-Use this to upload to Outline, Notion, a webhook, or any other destination. See `.hushnoterc.example` for details.
+Use this to upload to Outline, Notion, a webhook, or any other destination. See `.shepitnoterc.example` for details.
 
 ### Confluence publishing
 
@@ -451,12 +451,12 @@ summary to Confluence storage format and creates — or, on re-run, updates — 
 configured space (issue #3). Point `POST_SUMMARY_HOOK` at it to enable:
 
 ```bash
-# In .hushnoterc:
-POST_SUMMARY_HOOK="${HOME}/path/to/hushnote/hooks/confluence_publish.py"
+# In .shepitnoterc:
+POST_SUMMARY_HOOK="${HOME}/path/to/shepitnote/hooks/confluence_publish.py"
 ```
 
-**Configuration** (all read from the environment; `.hushnoterc` is sourced before the hook
-runs, so set them there — see `.hushnoterc.example` for the annotated block):
+**Configuration** (all read from the environment; `.shepitnoterc` is sourced before the hook
+runs, so set them there — see `.shepitnoterc.example` for the annotated block):
 
 | Variable | Required | Purpose |
 | --- | --- | --- |
@@ -494,9 +494,9 @@ Inspect the output, then set the `CONFLUENCE_*` config and let the hook publish 
 **Confirm-gating.** When wired to `POST_SUMMARY_HOOK`, this publisher runs automatically after
 every summary — enabling it is opt-in purely by setting `POST_SUMMARY_HOOK`. If you want an
 interactive **confirm before each publish** instead, use
-[`./hushnote meeting`](#guided-flow-with-review--confirm-gated-publishing): it runs the same
+[`./shepitnote meeting`](#guided-flow-with-review--confirm-gated-publishing): it runs the same
 publisher only after an explicit per-target yes and never publishes on its own. If a publish
-fails (missing config, API/network error) the hook exits non-zero, so hushnote does not write the
+fails (missing config, API/network error) the hook exits non-zero, so shepitnote does not write the
 `.hook_done` marker and retries it on the next `catchup`/`process`.
 
 ### Slack publishing
@@ -508,15 +508,15 @@ Slack mrkdwn, appends a link to the Confluence page when one exists, and posts i
 webhook or a bot token. Point `POST_SUMMARY_HOOK` at it to enable Slack only:
 
 ```bash
-# In .hushnoterc:
-POST_SUMMARY_HOOK="${HOME}/path/to/hushnote/hooks/slack_publish.py"
+# In .shepitnoterc:
+POST_SUMMARY_HOOK="${HOME}/path/to/shepitnote/hooks/slack_publish.py"
 ```
 
 The TL;DR pass reuses the same `OLLAMA_MODEL` / `OLLAMA_URL` as the main summary (falling back to
 the same `llama3.1:8b` / `http://localhost:11434` defaults), so Ollama must be running.
 
-**Configuration** (all read from the environment; set them in `.hushnoterc`, which is sourced
-before the hook runs — see `.hushnoterc.example` for the annotated block). Pick **one** of the two
+**Configuration** (all read from the environment; set them in `.shepitnoterc`, which is sourced
+before the hook runs — see `.shepitnoterc.example` for the annotated block). Pick **one** of the two
 auth styles:
 
 | Variable | Required | Purpose |
@@ -549,7 +549,7 @@ hooks/slack_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.md --
 The bot token and webhook URL are never printed (redacted from every error and from the dry-run
 target line). As with Confluence, the hook posts whenever it is invoked; for an interactive
 **confirm before each post**, use
-[`./hushnote meeting`](#guided-flow-with-review--confirm-gated-publishing), which asks yes/no per
+[`./shepitnote meeting`](#guided-flow-with-review--confirm-gated-publishing), which asks yes/no per
 target and never posts on its own.
 
 ### Publishing to both
@@ -558,8 +558,8 @@ There is only one `POST_SUMMARY_HOOK` slot, so to publish the **full notes to Co
 short TL;DR to Slack** point it at the bundled dispatcher, `hooks/publish.py`:
 
 ```bash
-# In .hushnoterc (with the CONFLUENCE_* and SLACK_* blocks both filled in):
-POST_SUMMARY_HOOK="${HOME}/path/to/hushnote/hooks/publish.py"
+# In .shepitnoterc (with the CONFLUENCE_* and SLACK_* blocks both filled in):
+POST_SUMMARY_HOOK="${HOME}/path/to/shepitnote/hooks/publish.py"
 ```
 
 The dispatcher runs each publisher that is configured — Confluence when `CONFLUENCE_BASE_URL` is
@@ -567,7 +567,7 @@ set, Slack when `SLACK_WEBHOOK_URL` or `SLACK_BOT_TOKEN` is set — **Confluence
 link is available to the Slack message in the same run. Each publisher is independently idempotent
 (Confluence updates the same page; Slack skips on its `.slack_done` marker), so a retry after a
 partial failure re-runs only what failed and never duplicates. The dispatcher exits non-zero if any
-enabled publisher failed (so hushnote retries), and the standalone publishers remain directly
+enabled publisher failed (so shepitnote retries), and the standalone publishers remain directly
 invokable for one-destination setups.
 
 ## Troubleshooting
@@ -579,7 +579,7 @@ pactl set-default-source YOUR_SOURCE_NAME
 ./record_audio.sh -d 5   # test with a 5-second recording
 ```
 
-**Wrong language detected:** faster-whisper samples only the first 30 seconds and picks one language for the whole file. If your meeting starts with silence or a different language — or if Ukrainian audio comes out transcribed as Russian (a common mislabel) — set the language explicitly with `-l uk|ru|en` or `WHISPER_LANGUAGE` in `.hushnoterc`. See [Language selection](#language-selection-ukrainian--russian--english) for details.
+**Wrong language detected:** faster-whisper samples only the first 30 seconds and picks one language for the whole file. If your meeting starts with silence or a different language — or if Ukrainian audio comes out transcribed as Russian (a common mislabel) — set the language explicitly with `-l uk|ru|en` or `WHISPER_LANGUAGE` in `.shepitnoterc`. See [Language selection](#language-selection-ukrainian--russian--english) for details.
 
 **Ollama not responding:**
 ```bash
@@ -589,7 +589,7 @@ ollama list
 
 **GPU out of memory:** ShepitNote automatically falls back to CPU if CUDA OOM occurs during model load or transcription.
 
-**Recording has a long silent tail:** Run `hushnote trim FILE` to detect and remove it. The binary search scans ~10 windows to find the content boundary regardless of file length.
+**Recording has a long silent tail:** Run `shepitnote trim FILE` to detect and remove it. The binary search scans ~10 windows to find the content boundary regardless of file length.
 
 ## License
 
@@ -597,6 +597,6 @@ MIT — see the [LICENSE](LICENSE) file. The original copyright (© 2025 Peter J
 
 ## Credits
 
-ShepitNote is a fork of **[hushnote](https://github.com/peteonrails/hushnote)** by Peter Jackson ([@peteonrails](https://github.com/peteonrails)), used under the MIT License. The original recording → transcription → summarization pipeline and the post-summary hook design come from that project; this fork adds dual-track You/Remote capture, uk/ru/en language handling, tech-term accuracy (hotwords + glossary), Confluence/Slack publishing with a dispatcher, and the guided `hushnote meeting` flow.
+ShepitNote is a fork of **[hushnote](https://github.com/peteonrails/hushnote)** by Peter Jackson ([@peteonrails](https://github.com/peteonrails)), used under the MIT License. The original recording → transcription → summarization pipeline and the post-summary hook design come from that project; this fork adds dual-track You/Remote capture, uk/ru/en language handling, tech-term accuracy (hotwords + glossary), Confluence/Slack publishing with a dispatcher, and the guided `shepitnote meeting` flow.
 
 Built on top of [faster-whisper](https://github.com/guillaumekln/faster-whisper), [Ollama](https://ollama.ai), [pyannote.audio](https://github.com/pyannote/pyannote-audio), and [ffmpeg](https://ffmpeg.org).

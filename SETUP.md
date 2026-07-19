@@ -29,21 +29,21 @@ Your system has these models ready for summarization:
 ### Test with a 10-second recording:
 ```bash
 # Record 10 seconds, transcribe, and summarize
-./hushnote full -d 10 -m tiny -o qwen2.5-coder:14b
+./shepitnote full -d 10 -m tiny -o qwen2.5-coder:14b
 ```
 
 ### For real meetings:
 ```bash
 # Start recording (press Ctrl+C to stop)
-./hushnote full -o qwen2.5-coder:14b
+./shepitnote full -o qwen2.5-coder:14b
 ```
 
 ### Guided flow (review + confirm before publishing):
 ```bash
 # Record -> review language/transcript/summary -> edit title -> confirm publish
-./hushnote meeting
+./shepitnote meeting
 ```
-`hushnote meeting` runs the whole loop but **never publishes automatically**: it
+`shepitnote meeting` runs the whole loop but **never publishes automatically**: it
 shows the detected language, transcript and summary, lets you edit the title, and
 asks yes/no per configured target (Confluence / Slack) before sending. A blank
 answer or EOF means "do not publish". It uses plain line prompts, so it works over
@@ -77,7 +77,7 @@ So point your default source at the mic you speak into and your default sink at
 the device the call audio plays out of, then run:
 
 ```bash
-AUDIO_SOURCE_TYPE=dual ./hushnote full -d 10 -m tiny -o mistral:7b
+AUDIO_SOURCE_TYPE=dual ./shepitnote full -d 10 -m tiny -o mistral:7b
 ```
 
 > **Tip: use a headset for the cleanest separation.** On open laptop speakers
@@ -90,14 +90,14 @@ For Bluetooth headsets in HSP/HFP mode, ffmpeg's PulseAudio capture can be
 silent; use the PipeWire backend instead:
 
 ```bash
-AUDIO_SOURCE_TYPE=dual RECORD_BACKEND=pw-record ./hushnote full
+AUDIO_SOURCE_TYPE=dual RECORD_BACKEND=pw-record ./shepitnote full
 ```
 
 ## Capturing calls: Zoom, Slack huddles, Bluetooth
 
 Capture is **sink-monitor based**, so it is app-agnostic: the remote side of any
 call — Zoom (native app or browser), Slack huddles, Google Meet, Discord — plays
-through your **default sink**, and hushnote records that sink's `.monitor`. You do
+through your **default sink**, and shepitnote records that sink's `.monitor`. You do
 not configure anything per app; you configure the *default sink*.
 
 Pick the mode with `AUDIO_SOURCE_TYPE`:
@@ -110,7 +110,7 @@ Pick the mode with `AUDIO_SOURCE_TYPE`:
 | `microphone` (default) | mic only | in-person / dictation, no call audio |
 
 ```bash
-AUDIO_SOURCE_TYPE=dual ./hushnote meeting -o mistral:7b   # recommended for a call
+AUDIO_SOURCE_TYPE=dual ./shepitnote meeting -o mistral:7b   # recommended for a call
 ```
 
 ### Route the call audio to the default sink
@@ -140,10 +140,10 @@ In **HSP/HFP**, `ffmpeg -f pulse` sometimes captures **silence** from the sink
 monitor. If that happens, switch the recorder backend to PipeWire's `pw-record`:
 
 ```bash
-AUDIO_SOURCE_TYPE=dual RECORD_BACKEND=pw-record ./hushnote meeting
+AUDIO_SOURCE_TYPE=dual RECORD_BACKEND=pw-record ./shepitnote meeting
 ```
 
-Set `RECORD_BACKEND=pw-record` in `.hushnoterc` if you always record over a BT headset.
+Set `RECORD_BACKEND=pw-record` in `.shepitnoterc` if you always record over a BT headset.
 
 ### Verify your routing on a real call (do this once)
 
@@ -151,7 +151,7 @@ Join a test call (Zoom has a built-in test meeting; or a Slack huddle with a
 colleague) and, **while the other side is talking**, record a short sample:
 
 ```bash
-AUDIO_SOURCE_TYPE=dual ./hushnote full -d 15 -m tiny -o mistral:7b
+AUDIO_SOURCE_TYPE=dual ./shepitnote full -d 15 -m tiny -o mistral:7b
 ```
 
 Then, in the newest `recordings/<date>/meeting_*/` directory, confirm:
@@ -170,13 +170,13 @@ recording that is silent has the same two causes.
 For best results:
 ```bash
 # Good balance (fast, decent quality)
-./hushnote full -m base -o mistral:7b
+./shepitnote full -m base -o mistral:7b
 
 # Better quality (slower)
-./hushnote full -m small -o qwen2.5-coder:14b
+./shepitnote full -m small -o qwen2.5-coder:14b
 
 # Best quality (much slower)
-./hushnote full -m medium -o mixtral:8x7b
+./shepitnote full -m medium -o mixtral:8x7b
 ```
 
 ## Language & accuracy (uk/ru/en)
@@ -187,10 +187,10 @@ of relying on auto-detect (which samples only the first ~30s and often mislabels
 Ukrainian as Russian):
 
 ```bash
-./hushnote full -l uk     # or -l ru / -l en; -l auto to auto-detect
+./shepitnote full -l uk     # or -l ru / -l en; -l auto to auto-detect
 ```
 
-Set a permanent default with `WHISPER_LANGUAGE=uk` in `.hushnoterc`. See the
+Set a permanent default with `WHISPER_LANGUAGE=uk` in `.shepitnoterc`. See the
 [Language selection](README.md#language-selection-ukrainian--russian--english)
 section in the README for the full guidance — including a user verification step
 for measuring accuracy on your own recordings, which needs your own audio and
@@ -205,11 +205,11 @@ nothing):
 - **Hotwords / initial prompt** bias Whisper toward clean English spellings.
   Set `WHISPER_HOTWORDS="Kubernetes deploy Helm chart Jenkins GitHub"` (or the
   sentence-form `WHISPER_INITIAL_PROMPT`, which takes precedence) in
-  `.hushnoterc`.
+  `.shepitnoterc`.
 - **A per-language glossary** normalizes phonetic Cyrillic renderings before the
   summary. Copy a template to activate it, e.g.
   `cp glossary.uk.txt.example glossary.uk.txt`, then edit it for your stack
-  (`GLOSSARY_DIR` points at where these files live; default is the hushnote
+  (`GLOSSARY_DIR` points at where these files live; default is the shepitnote
   directory). Real `glossary.*.txt` files are git-ignored.
 
 Full format, language-resolution behavior, and a with/without verification
@@ -221,19 +221,19 @@ section.
 
 ```bash
 # List recordings
-./hushnote list
+./shepitnote list
 
 # Record only (30 minutes)
-./hushnote record -d 1800
+./shepitnote record -d 1800
 
 # Transcribe existing audio
-./hushnote transcribe path/to/audio.wav -m small
+./shepitnote transcribe path/to/audio.wav -m small
 
 # Summarize existing transcription
-./hushnote summarize path/to/transcript.txt -o qwen2.5-coder:14b
+./shepitnote summarize path/to/transcript.txt -o qwen2.5-coder:14b
 
 # Guided flow: record, review, confirm-gated publish (SSH-friendly)
-./hushnote meeting
+./shepitnote meeting
 ```
 
 ## Troubleshooting
@@ -247,7 +247,7 @@ If you get "llama3.1:8b not found", either:
 Try a test recording to make sure everything works!
 
 ```bash
-./hushnote full -d 10 -m tiny -o mistral:7b
+./shepitnote full -d 10 -m tiny -o mistral:7b
 ```
 
 This will:
@@ -261,7 +261,7 @@ Check the `recordings/` directory for the output files.
 
 To auto-publish each summary to a Confluence space, point `POST_SUMMARY_HOOK` at the
 bundled `hooks/confluence_publish.py` and set the `CONFLUENCE_*` variables in
-`.hushnoterc`. Preview the output first, without any credentials:
+`.shepitnoterc`. Preview the output first, without any credentials:
 
 ```bash
 hooks/confluence_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.md --dry-run
@@ -269,14 +269,14 @@ hooks/confluence_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.
 
 See the [Confluence publishing](README.md#confluence-publishing) section of the README for
 the full setup (getting an API token, the page-title/idempotency behavior). For a per-meeting
-**confirm before publishing** instead of the automatic hook, use `./hushnote meeting`, which
+**confirm before publishing** instead of the automatic hook, use `./shepitnote meeting`, which
 asks yes/no per target and never publishes on its own.
 
 ## Publishing summaries to Slack
 
 To post a short TL;DR of each summary to Slack, point `POST_SUMMARY_HOOK` at the bundled
 `hooks/slack_publish.py` and set either `SLACK_WEBHOOK_URL` (incoming webhook) or
-`SLACK_BOT_TOKEN` + `SLACK_CHANNEL` (bot token) in `.hushnoterc`. Preview first — no token
+`SLACK_BOT_TOKEN` + `SLACK_CHANNEL` (bot token) in `.shepitnoterc`. Preview first — no token
 needed (it still calls the local Ollama to build the TL;DR):
 
 ```bash
@@ -289,4 +289,4 @@ have configured. See the [Slack publishing](README.md#slack-publishing) and
 [Publishing to both](README.md#publishing-to-both) sections of the README for the full setup
 (webhook vs bot token, the `.slack_done` de-dup marker, the Confluence-link-when-available
 behavior). For a per-meeting **confirm before publishing** instead of the automatic hook, use
-`./hushnote meeting`, which asks yes/no per target and never publishes on its own.
+`./shepitnote meeting`, which asks yes/no per target and never publishes on its own.

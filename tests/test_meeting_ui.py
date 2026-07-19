@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 
 """
-Unit tests for meeting_ui.py -- the pure helpers behind the guided `hushnote
+Unit tests for meeting_ui.py -- the pure helpers behind the guided `shepitnote
 meeting` flow (issue #5). No mic, no Ollama, no network: every helper is a pure
 function or a small filesystem read/write against a tempdir. Covers the
 configured-targets matrix, the fail-safe yes/no gate, the tolerant metadata

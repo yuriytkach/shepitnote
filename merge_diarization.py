@@ -167,7 +167,7 @@ def main():
         save_merged(result, output_file)
 
         print(f"\nNext step:", file=sys.stderr)
-        print(f"  ./hushnote label {output_file}", file=sys.stderr)
+        print(f"  ./shepitnote label {output_file}", file=sys.stderr)
 
     except Exception as e:
         print(f"Error during merge: {e}", file=sys.stderr)

@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
 
 """
-Helpers + tiny CLI for the guided `hushnote meeting` terminal flow (issue #5).
+Helpers + tiny CLI for the guided `shepitnote meeting` terminal flow (issue #5).
 
 The interactive record -> review -> confirm -> publish loop itself lives in the
-bash `meeting_ui()` function in `hushnote` (plain line prompts, works over SSH).
+bash `meeting_ui()` function in `shepitnote` (plain line prompts, works over SSH).
 This module holds the small pure pieces that loop shells out to, so they can be
 unit-tested without a mic, Ollama or the network:
 

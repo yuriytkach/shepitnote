@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
 
 """
-Post-summary hook: publish a HushNote meeting summary to Confluence (issue #3).
+Post-summary hook: publish a ShepitNote meeting summary to Confluence (issue #3).
 
-hushnote's run_post_summary_hook invokes this as:
+shepitnote's run_post_summary_hook invokes this as:
 
     hooks/confluence_publish.py <base>_summary.md
 
@@ -14,9 +14,9 @@ the configured space via the REST content API. Re-running on the same meeting
 updates the same page (idempotent), never duplicating.
 
 All configuration and secrets come from CONFLUENCE_* environment variables
-(hushnote sources .hushnoterc before invoking the hook). Nothing is hardcoded and
+(shepitnote sources .shepitnoterc before invoking the hook). Nothing is hardcoded and
 the API token is never printed. The hook exits 0 only on a successful publish (or
-a dry-run) and non-zero on any missing-config / API / network error, so hushnote
+a dry-run) and non-zero on any missing-config / API / network error, so shepitnote
 does not write the .hook_done marker and retries the hook next catchup/process.
 
 Cloud (Confluence Cloud, REST v1) is the primary target: HTTP Basic with
@@ -366,7 +366,7 @@ def validate_required(cfg):
         raise ConfigError(
             "Missing required Confluence configuration: "
             + ", ".join(missing)
-            + ". Set these in .hushnoterc (see .hushnoterc.example)."
+            + ". Set these in .shepitnoterc (see .shepitnoterc.example)."
         )
     if cfg["auth_mode"] == "basic" and not cfg["email"]:
         raise ConfigError(
@@ -500,7 +500,7 @@ def publish(cfg, title, xhtml, marker_path=None):
 
 def main(argv=None):
     parser = argparse.ArgumentParser(
-        description="Publish a HushNote meeting summary to Confluence (post-summary hook)."
+        description="Publish a ShepitNote meeting summary to Confluence (post-summary hook)."
     )
     parser.add_argument("summary_file", help="Path to the <base>_summary.md file")
     parser.add_argument(

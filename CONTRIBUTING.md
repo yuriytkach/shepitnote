@@ -1,6 +1,6 @@
-# Contributing to HushNote
+# Contributing to ShepitNote
 
-Thank you for your interest in contributing to HushNote! This document provides guidelines and instructions for contributing.
+Thank you for your interest in contributing to ShepitNote! This document provides guidelines and instructions for contributing.
 
 ## Code of Conduct
 
@@ -44,8 +44,8 @@ Enhancement suggestions are welcome! Please:
 
 ```bash
 # Clone your fork
-git clone https://github.com/YOUR_USERNAME/hushnote.git
-cd hushnote
+git clone https://github.com/YOUR_USERNAME/shepitnote.git
+cd shepitnote
 
 # Create virtual environment
 python -m venv venv
@@ -58,7 +58,7 @@ pip install -r requirements.txt
 pip install -r requirements-dev.txt  # when available
 
 # Make scripts executable
-chmod +x hushnote record_audio.sh transcribe.py summarize.py
+chmod +x shepitnote record_audio.sh transcribe.py summarize.py
 ```
 
 ## Testing
@@ -67,19 +67,19 @@ Before submitting a PR, test your changes:
 
 ```bash
 # Test basic recording (2 seconds)
-./hushnote record -d 2
+./shepitnote record -d 2
 
 # Test transcription
-./hushnote transcribe recordings/meeting_*.wav -m tiny
+./shepitnote transcribe recordings/meeting_*.wav -m tiny
 
 # Test summarization
-./hushnote summarize recordings/meeting_*.txt -o llama3.2:1b
+./shepitnote summarize recordings/meeting_*.txt -o llama3.2:1b
 
 # Test full workflow
-./hushnote full -d 5 -m tiny -o llama3.2:1b
+./shepitnote full -d 5 -m tiny -o llama3.2:1b
 
 # Enable debug mode for detailed output
-DEBUG=true ./hushnote full -d 5 -m tiny
+DEBUG=true ./shepitnote full -d 5 -m tiny
 ```
 
 ## Code Style
@@ -107,8 +107,8 @@ DEBUG=true ./hushnote full -d 5 -m tiny
 ## Project Structure
 
 ```
-hushnote/
-├── hushnote              # Main orchestration script
+shepitnote/
+├── shepitnote              # Main orchestration script
 ├── record_audio.sh       # Audio recording script
 ├── transcribe.py         # Transcription script (faster-whisper)
 ├── summarize.py          # Summarization script (Ollama)
@@ -169,9 +169,9 @@ When adding features:
 
 ## Questions?
 
-- Open a [Discussion](https://github.com/peteonrails/hushnote/discussions)
-- Check existing [Issues](https://github.com/peteonrails/hushnote/issues)
-- Read the [Wiki](https://github.com/peteonrails/hushnote/wiki) (when available)
+- Open a [Discussion](https://github.com/yuriytkach/shepitnote/discussions)
+- Check existing [Issues](https://github.com/yuriytkach/shepitnote/issues)
+- Read the [Wiki](https://github.com/yuriytkach/shepitnote/wiki) (when available)
 
 ## License
 
@@ -179,4 +179,4 @@ By contributing, you agree that your contributions will be licensed under the MI
 
 ---
 
-Thank you for contributing to HushNote! 🎙️
+Thank you for contributing to ShepitNote! 🎙️

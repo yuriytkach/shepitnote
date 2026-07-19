@@ -119,7 +119,7 @@ def interactive_label_speakers(data: dict) -> dict:
         print("Error: No speakers found in data", file=sys.stderr)
         sys.exit(1)
 
-    print("\nHushNote Speaker Labeling")
+    print("\nShepitNote Speaker Labeling")
     print("═" * 70)
     print(f"\nFound {len(speakers)} speaker(s) in {data.get('audio_file', 'audio')}")
     print()
@@ -260,7 +260,7 @@ def main():
         save_labeled(data, output_file)
 
         print("\nNext step:", file=sys.stderr)
-        print(f"  ./hushnote apply-labels {output_file}", file=sys.stderr)
+        print(f"  ./shepitnote apply-labels {output_file}", file=sys.stderr)
 
     except Exception as e:
         print(f"Error during labeling: {e}", file=sys.stderr)

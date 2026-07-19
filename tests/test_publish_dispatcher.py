@@ -80,7 +80,7 @@ class TestRunAll(unittest.TestCase):
     def test_slack_deferred_when_confluence_fails_and_no_marker(self):
         # Transient Confluence failure with no page yet: slack must NOT run (else it
         # would post a linkless message and latch .slack_done). It is DEFERRED and
-        # the overall exit is non-zero so hushnote retries.
+        # the overall exit is non-zero so shepitnote retries.
         seen = []
 
         def runner(name, summary_file):
@@ -178,7 +178,7 @@ class TestMain(unittest.TestCase):
 
     def test_main_defers_slack_when_confluence_fails_no_marker(self):
         # End-to-end through main(): both enabled, confluence fails, no marker ->
-        # slack deferred (not invoked), overall non-zero so hushnote retries.
+        # slack deferred (not invoked), overall non-zero so shepitnote retries.
         seen = []
 
         def runner(name, summary_file):

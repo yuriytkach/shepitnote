@@ -74,5 +74,5 @@ echo "  Skipped:  $skipped_count file(s)"
 
 if [ $migrated_count -gt 0 ]; then
     echo ""
-    echo "You can now use './hushnote list' to see your migrated recordings."
+    echo "You can now use './shepitnote list' to see your migrated recordings."
 fi

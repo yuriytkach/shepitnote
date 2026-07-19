@@ -3,7 +3,7 @@ requires = ["setuptools>=70"]
 build-backend = "setuptools.backends.legacy:build"
 
 [project]
-name = "hushnote"
+name = "shepitnote"
 version = "0.2.0"
 description = "Privacy-first meeting transcription and voice-to-text tool for Linux"
 readme = "README.md"
@@ -26,9 +26,9 @@ gpu = [
     # pip install torch --index-url https://download.pytorch.org/whl/cu121
 ]
 all = [
-    "hushnote[diarize,gpu]",
+    "shepitnote[diarize,gpu]",
 ]
 
 [project.urls]
-Homepage = "https://github.com/peteonrails/hushnote"
-Issues = "https://github.com/peteonrails/hushnote/issues"
+Homepage = "https://github.com/yuriytkach/shepitnote"
+Issues = "https://github.com/yuriytkach/shepitnote/issues"

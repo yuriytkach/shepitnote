@@ -183,7 +183,7 @@ def main():
         save_diarization(result, output_file)
 
         print(f"\nNext step:", file=sys.stderr)
-        print(f"  1. Transcribe the audio: ./hushnote transcribe {args.audio_file}", file=sys.stderr)
+        print(f"  1. Transcribe the audio: ./shepitnote transcribe {args.audio_file}", file=sys.stderr)
         print(f"  2. Then label speakers with their names", file=sys.stderr)
 
     except Exception as e:

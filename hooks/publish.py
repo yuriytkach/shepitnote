@@ -11,7 +11,7 @@ invokes each bundled publisher as a subprocess based on which env vars are set:
     POST_SUMMARY_HOOK=".../hooks/publish.py"
 
 It receives $1 = <base>_summary.md and exits 0/non-zero exactly like any hook, so
-hushnote's run_post_summary_hook contract is untouched. The standalone publishers
+shepitnote's run_post_summary_hook contract is untouched. The standalone publishers
 (hooks/confluence_publish.py, hooks/slack_publish.py) remain directly invokable;
 users who want only one destination can still point POST_SUMMARY_HOOK straight at
 that one.
@@ -25,11 +25,11 @@ its first successful post and never posts again), Slack is GATED on Confluence w
 both are enabled: it runs only once the Confluence page id is available — either
 Confluence exited 0 this run, or its <base>.confluence_page_id marker already
 exists from an earlier run. If Confluence just failed and no page exists yet, Slack
-is DEFERRED (held back) this run and the aggregate exit is non-zero, so hushnote
+is DEFERRED (held back) this run and the aggregate exit is non-zero, so shepitnote
 retries the whole hook; the retry posts the single Slack message WITH the link once
 Confluence recovers. Without this gate, a transient Confluence failure would make
 Slack post a linkless message and latch .slack_done, permanently losing the link.
-(If Confluence is PERMANENTLY broken the hook never completes anyway — hushnote
+(If Confluence is PERMANENTLY broken the hook never completes anyway — shepitnote
 keeps retrying it — so deferring Slack until Confluence recovers is the intended
 trade-off.)
 
@@ -39,11 +39,11 @@ marker and never re-posts. So a whole-hook retry after a partial failure is safe
 a publisher that already succeeded no-ops, only the failed one is retried, and a
 deferred Slack post runs on a later retry. Aggregate exit: 0 iff every ENABLED
 publisher exited 0 (a marker-driven no-op counts as 0); non-zero if any enabled
-publisher failed OR Slack was deferred (so hushnote does not write .hook_done and
+publisher failed OR Slack was deferred (so shepitnote does not write .hook_done and
 retries). With no publisher configured it warns and returns 0, avoiding an infinite
 retry loop on a bare misconfiguration.
 
-Subprocesses inherit os.environ (so the `set -a`-exported .hushnoterc vars pass
+Subprocesses inherit os.environ (so the `set -a`-exported .shepitnoterc vars pass
 through, including SLACK_DRY_RUN / CONFLUENCE_DRY_RUN) and isolate a crash or
 sys.exit in one publisher from the other. Stdlib only.
 """
@@ -158,7 +158,7 @@ def main(argv=None, runner=None, env=None, marker_present=None):
     if not publishers:
         print(
             "Warning: no publisher configured — set CONFLUENCE_BASE_URL (Confluence) "
-            "and/or SLACK_WEBHOOK_URL / SLACK_BOT_TOKEN (Slack) in .hushnoterc. "
+            "and/or SLACK_WEBHOOK_URL / SLACK_BOT_TOKEN (Slack) in .shepitnoterc. "
             "Nothing to publish.",
             file=sys.stderr,
         )

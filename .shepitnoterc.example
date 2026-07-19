@@ -1,9 +1,9 @@
-# HushNote configuration
-# Copy this file to .hushnoterc and edit to your needs.
+# ShepitNote configuration
+# Copy this file to .shepitnoterc and edit to your needs.
 # This file is sourced as bash, so standard shell syntax applies.
 
 # Directory where recordings are stored
-# Default: ./recordings (relative to the hushnote directory)
+# Default: ./recordings (relative to the shepitnote directory)
 #RECORDINGS_DIR="${HOME}/meeting-notes"
 
 # Whisper model size: tiny, base, small, medium, large-v3
@@ -42,12 +42,12 @@
 # GLOSSARY_DIR: directory holding the per-language term glossaries applied to the
 # transcript before summarization. Files are: glossary.txt (shared, all
 # languages) and glossary.<lang>.txt (e.g. glossary.uk.txt, glossary.ru.txt).
-# Ship templates live next to hushnote as glossary*.txt.example — copy one and
+# Ship templates live next to shepitnote as glossary*.txt.example — copy one and
 # edit it to activate, e.g.:  cp glossary.uk.txt.example glossary.uk.txt
 # Real glossary.*.txt files are git-ignored (they match *.txt), so they stay
 # untracked automatically.
-# Default: the hushnote script directory.
-#GLOSSARY_DIR="${HOME}/.config/hushnote"
+# Default: the shepitnote script directory.
+#GLOSSARY_DIR="${HOME}/.config/shepitnote"
 # --------------------------------------------------------------------------
 
 # Ollama model for summarization
@@ -97,22 +97,22 @@
 
 # Post-summary hook: path to an executable that runs after every summary is created.
 # Receives the summary file path as $1.
-# On success, hushnote writes a .hook_done marker so the hook is not re-run.
+# On success, shepitnote writes a .hook_done marker so the hook is not re-run.
 # Use this to integrate with Outline, Notion, a webhook, or any other destination.
 #
-# Example using the bundled hushnote-to-outline script:
-#POST_SUMMARY_HOOK="${HOME}/.local/bin/hushnote-to-outline"
+# Example using the bundled shepitnote-to-outline script:
+#POST_SUMMARY_HOOK="${HOME}/.local/bin/shepitnote-to-outline"
 #
 # Example using the bundled Confluence publisher (issue #3, see the CONFLUENCE_*
 # block below and the README "Confluence publishing" section):
-#POST_SUMMARY_HOOK="${HOME}/path/to/hushnote/hooks/confluence_publish.py"
+#POST_SUMMARY_HOOK="${HOME}/path/to/shepitnote/hooks/confluence_publish.py"
 #
 # Example publishing to BOTH Confluence (full notes) and Slack (short TL;DR):
 # point the hook at the bundled dispatcher, which runs each publisher that is
 # configured (Confluence first, so its page link is available to the Slack
 # message). See the SLACK_* block below and the README "Slack publishing" and
 # "Publishing to both" sections.
-#POST_SUMMARY_HOOK="${HOME}/path/to/hushnote/hooks/publish.py"
+#POST_SUMMARY_HOOK="${HOME}/path/to/shepitnote/hooks/publish.py"
 
 # --- Confluence publishing (issue #3) -------------------------------------
 # Used only by hooks/confluence_publish.py (set POST_SUMMARY_HOOK above to it).
@@ -140,7 +140,7 @@
 # CONFLUENCE_API_TOKEN: Cloud API token OR Server/DC Personal Access Token.
 #   Cloud token:  https://id.atlassian.com/manage-profile/security/api-tokens
 #   Server/DC PAT: your profile -> Personal Access Tokens
-# Never commit a real token; keep it in your private .hushnoterc only.
+# Never commit a real token; keep it in your private .shepitnoterc only.
 #CONFLUENCE_API_TOKEN="your-api-token"
 #
 # Optional:
@@ -204,7 +204,7 @@
 #SLACK_DRY_RUN=1
 # --------------------------------------------------------------------------
 
-# Notification command override. By default hushnote uses dunstify (if available)
+# Notification command override. By default shepitnote uses dunstify (if available)
 # with replace-by-ID so reminders update in place, falling back to notify-send.
 # Set this to use a different notifier, e.g. mako, fnott, or a custom script.
 # Will be called as: $NOTIFY_CMD "summary" "body"
