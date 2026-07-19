@@ -85,6 +85,12 @@ Environment Variables:
     AUDIO_SOURCE_TYPE   Capture mode: microphone (default), monitor, both, or
                         dual. dual records separate You (mic) and Remote (system)
                         tracks and labels the transcript by origin, no diarization.
+    DUAL_REMOTE_DIARIZATION  In dual mode, set to true to diarize the Remote
+                        track and split far-side speakers into [Remote 1]/[Remote 2]/...
+                        Opt-in; needs HF_TOKEN + pyannote; falls back to a single
+                        [Remote] on any failure (default: false)
+    DUAL_REMOTE_SPEAKERS  Optional exact far-side speaker count hint for the
+                        above (default: auto-detect)
     WHISPER_MODEL       Default Whisper model (default: large-v3)
     WHISPER_LANGUAGE    Default language code, e.g. uk, ru, en (default: auto-detect)
     WHISPER_HOTWORDS    Space-separated tech terms biasing transcription toward
@@ -989,8 +995,15 @@ full_workflow() {
 process_dual_meeting() {
     # Process a dual-track recording: transcribe the voice (You) and system
     # (Remote) tracks separately, tag each segment by track of origin, merge by
-    # timestamp, then render and summarize. No diarization is used for You vs
-    # Remote — that split comes from the two physical tracks.
+    # timestamp, then render and summarize. The You-vs-Remote split comes from
+    # the two physical tracks — no diarization needed for that.
+    #
+    # Optionally (issue #11, opt-in via DUAL_REMOTE_DIARIZATION=true) the system
+    # track alone is diarized so several people on the far side become
+    # [Remote 1] / [Remote 2] / ... The microphone track is never diarized, so
+    # [You] stays clean regardless. This is best-effort: any failure (no
+    # HF_TOKEN, pyannote missing, model download error) falls back to a single
+    # [Remote] label so the meeting still completes.
     local base="$1"
     shift
 
@@ -1086,12 +1099,40 @@ process_dual_meeting() {
     fi
     echo ""
 
-    # Step 3: Merge tracks — label by origin (You vs Remote), no diarization.
+    # Step 2b (opt-in): diarize the system (Remote) track so multiple far-side
+    # speakers split into [Remote 1] / [Remote 2] / ... Best-effort — any
+    # failure falls back to a single [Remote] label and the meeting continues.
+    local system_diar_json=""
+    if [ "${DUAL_REMOTE_DIARIZATION:-false}" = "true" ]; then
+        log_info "Step 2b: Diarizing system track (splitting Remote per speaker)..."
+        if [ -z "${HF_TOKEN:-}" ]; then
+            log_warn "DUAL_REMOTE_DIARIZATION is on but HF_TOKEN is not set — keeping a single [Remote] label."
+        else
+            local diar_out="${base}.system_speakers.json"
+            local diar_cmd=("$PYTHON" "${SCRIPT_DIR}/diarize.py" "$system_wav" -o "$diar_out")
+            [ -n "${DUAL_REMOTE_SPEAKERS:-}" ]     && diar_cmd+=(-s "$DUAL_REMOTE_SPEAKERS")
+            [ -n "${DUAL_REMOTE_MIN_SPEAKERS:-}" ] && diar_cmd+=(--min-speakers "$DUAL_REMOTE_MIN_SPEAKERS")
+            [ -n "${DUAL_REMOTE_MAX_SPEAKERS:-}" ] && diar_cmd+=(--max-speakers "$DUAL_REMOTE_MAX_SPEAKERS")
+            # Guarded in an `if` so a nonzero exit is caught (not fatal under set -e).
+            if "${diar_cmd[@]}" && [ -f "$diar_out" ]; then
+                system_diar_json="$diar_out"
+                log_success "Remote track diarized: $(basename "$diar_out")"
+            else
+                log_warn "Remote-track diarization failed — keeping a single [Remote] label."
+            fi
+        fi
+        echo ""
+    fi
+
+    # Step 3: Merge tracks — label by origin (You vs Remote). When a system-track
+    # diarization is available, the Remote side is split into per-speaker labels.
     log_info "Step 3: Merging tracks (You vs Remote)..."
     local labeled_file="${base}_speakers_labeled.json"
-    "$PYTHON" "${SCRIPT_DIR}/merge_tracks.py" \
-        --voice "$voice_json" --system "$system_json" \
-        --audio-file "$(basename "$voice_wav")" -o "$labeled_file"
+    local merge_cmd=("$PYTHON" "${SCRIPT_DIR}/merge_tracks.py"
+        --voice "$voice_json" --system "$system_json"
+        --audio-file "$(basename "$voice_wav")" -o "$labeled_file")
+    [ -n "$system_diar_json" ] && merge_cmd+=(--system-diarization "$system_diar_json")
+    "${merge_cmd[@]}"
 
     if [ ! -f "$labeled_file" ]; then
         log_error "Track merge failed"

@@ -11,6 +11,13 @@ per-segment start/end/text. This script tags every voice-track segment as
 origin, no diarization needed), interleaves them by each track's own start
 timestamp, and emits a *_speakers_labeled.json that apply_labels.py consumes
 unchanged.
+
+Optionally (issue #11), a pyannote diarization of the *system track only* can
+be supplied via --system-diarization. When present, the flat "Remote" label is
+split into per-speaker labels ("Remote 1", "Remote 2", ...) so a call with
+several people on the far side attributes each remote line to a distinct
+speaker. This is confined to the system track: the microphone track stays a
+clean "You", so the diarization guesswork never touches the local voice.
 """
 
 import argparse
@@ -18,6 +25,12 @@ import json
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
+
+# find_speaker_at_time lives in the sibling diarization merger; reuse it so the
+# per-speaker matching here behaves identically to the full-diarization path.
+# merge_tracks.py runs from SCRIPT_DIR (sys.path[0]) and tests put the repo root
+# on sys.path, so this import resolves in both cases.
+from merge_diarization import find_speaker_at_time
 
 
 def load_json(file_path: str) -> dict:
@@ -29,12 +42,52 @@ def load_json(file_path: str) -> dict:
     return json.loads(path.read_text())
 
 
+def _remote_labels_for_segments(
+    sys_segments: list,
+    diar_segments: list,
+    remote_label: str,
+) -> list:
+    """Compute a speaker label per system-track segment, aligned to sys_segments.
+
+    Without usable diarization (diar_segments empty), every remote segment gets
+    the single flat remote_label — the default You-vs-Remote behavior. With a
+    diarization of the remote track, each segment is matched to a pyannote
+    speaker by its start time and relabeled to a per-speaker name ("Remote 1",
+    "Remote 2", ...) ordered by first appearance. A lone detected speaker keeps
+    the plain remote_label (numbering only kicks in when it actually helps).
+
+    Whisper emits segments in chronological order, so iterating sys_segments in
+    place gives first-appearance ordering; the returned list is positionally
+    aligned to sys_segments for a straight zip() at the call site.
+    """
+    if not diar_segments:
+        return [remote_label] * len(sys_segments)
+
+    raw = [find_speaker_at_time(seg["start"], diar_segments) for seg in sys_segments]
+
+    # First-appearance order of the raw pyannote ids, so Remote 1 is whoever
+    # spoke first on the far side.
+    order = []
+    for rid in raw:
+        if rid not in order:
+            order.append(rid)
+
+    # 0 or 1 distinct remote speakers → keep the flat label (no "Remote 1" for a
+    # single person; matches the non-diarized output).
+    if len(order) <= 1:
+        return [remote_label] * len(sys_segments)
+
+    mapping = {rid: f"{remote_label} {i}" for i, rid in enumerate(order, start=1)}
+    return [mapping[rid] for rid in raw]
+
+
 def merge_tracks(
     voice: dict,
     system: dict,
     you_label: str = "You",
     remote_label: str = "Remote",
     audio_file: str = None,
+    system_diarization: dict = None,
 ) -> dict:
     """
     Merge voice-track and system-track transcriptions into one labeled result.
@@ -45,6 +98,10 @@ def merge_tracks(
         you_label: Speaker id/name for the microphone track
         remote_label: Speaker id/name for the system track
         audio_file: Optional canonical audio file name for the result
+        system_diarization: Optional pyannote diarization of the system track
+            (a diarize.py result dict). When it carries segments, the remote
+            side is split into per-speaker labels ("Remote 1", "Remote 2", ...);
+            the microphone track is never diarized and stays you_label.
 
     Returns:
         A dict shaped like the diarization pipeline's *_speakers_labeled.json
@@ -52,9 +109,6 @@ def merge_tracks(
         ready for apply_labels.py.
     """
     print("Merging voice and system tracks...", file=sys.stderr)
-
-    # Rank used to break ties deterministically: You before Remote.
-    rank = {you_label: 0, remote_label: 1}
 
     merged_segments = []
     for seg in voice.get("segments", []):
@@ -64,18 +118,24 @@ def merge_tracks(
             "end": seg["end"],
             "text": seg["text"],
         })
-    for seg in system.get("segments", []):
+
+    sys_segments = system.get("segments", [])
+    diar_segments = (system_diarization or {}).get("segments") or []
+    remote_labels = _remote_labels_for_segments(sys_segments, diar_segments, remote_label)
+    remote_diarized = any(lbl != remote_label for lbl in remote_labels)
+    for seg, speaker in zip(sys_segments, remote_labels):
         merged_segments.append({
-            "speaker_id": remote_label,
+            "speaker_id": speaker,
             "start": seg["start"],
             "end": seg["end"],
             "text": seg["text"],
         })
 
-    # Interleave chronologically by each track's own timestamps. Ties are
-    # broken by (end, speaker rank) so ordering is fully deterministic.
+    # Interleave chronologically by each track's own timestamps. Ties put You
+    # first; remote speakers keep insertion order among themselves (stable sort),
+    # so ordering is fully deterministic.
     merged_segments.sort(
-        key=lambda s: (s["start"], s["end"], rank.get(s["speaker_id"], 99))
+        key=lambda s: (s["start"], s["end"], 0 if s["speaker_id"] == you_label else 1)
     )
 
     # Per-speaker statistics (mirrors merge_diarization.py).
@@ -118,7 +178,7 @@ def merge_tracks(
         "segments": merged_segments,
         "speaker_stats": speaker_stats,
         "labels": labels,
-        "source": "dual_track",
+        "source": "dual_track_diarized" if remote_diarized else "dual_track",
     }
 
     print(f"Merged {len(merged_segments)} segments", file=sys.stderr)
@@ -151,11 +211,16 @@ def main():
                         help="Label for the microphone track (default: You)")
     parser.add_argument("--remote-label", default="Remote",
                         help="Label for the system track (default: Remote)")
+    parser.add_argument("--system-diarization",
+                        help="Optional pyannote diarization JSON of the system "
+                             "track (from diarize.py). When given, splits the "
+                             "single Remote label into per-speaker Remote 1/2/...")
 
     args = parser.parse_args()
 
     voice = load_json(args.voice)
     system = load_json(args.system)
+    system_diarization = load_json(args.system_diarization) if args.system_diarization else None
 
     try:
         result = merge_tracks(
@@ -164,6 +229,7 @@ def main():
             you_label=args.you_label,
             remote_label=args.remote_label,
             audio_file=args.audio_file,
+            system_diarization=system_diarization,
         )
 
         save_merged(result, args.output)

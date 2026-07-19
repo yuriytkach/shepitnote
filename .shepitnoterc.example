@@ -77,6 +77,26 @@
 # Default: microphone
 #AUDIO_SOURCE_TYPE=microphone
 
+# --- Split the Remote track into per-speaker labels (issue #11) ------------
+# In dual mode the far side normally shares one [Remote] label. Set this to
+# true to diarize the *system track only* so several people on the call become
+# [Remote 1] / [Remote 2] / ... The microphone track is never diarized, so
+# [You] stays clean regardless.
+#
+# Opt-in and best-effort: it needs HF_TOKEN (see below) and pyannote installed
+# (pip install pyannote.audio). If either is missing, or diarization fails, the
+# meeting still completes with a single [Remote] label. A lone detected speaker
+# keeps the plain [Remote] (numbering only appears when 2+ are found).
+# Default: false
+#DUAL_REMOTE_DIARIZATION=true
+#
+# Optional hint for the far-side speaker count (helps pyannote when you know it).
+# Leave unset to auto-detect. DUAL_REMOTE_MIN_SPEAKERS / DUAL_REMOTE_MAX_SPEAKERS
+# bound the estimate instead of fixing it.
+#DUAL_REMOTE_SPEAKERS=3
+#DUAL_REMOTE_MIN_SPEAKERS=2
+#DUAL_REMOTE_MAX_SPEAKERS=5
+
 # Unload Ollama models before transcription to free VRAM for Whisper.
 # Set to 1 if you run into out-of-memory errors during transcription.
 # Default: unset (disabled)

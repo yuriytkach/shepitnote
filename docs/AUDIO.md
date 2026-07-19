@@ -6,6 +6,7 @@ calls, routing call audio from Zoom/Slack/Meet, and the files each mode produces
 
 - [Capture modes](#capture-modes)
 - [Dual-track (You/Remote) recording](#dual-track-youremote-recording)
+- [Splitting Remote into per-speaker labels](#splitting-remote-into-per-speaker-labels)
 - [Echo cancellation (open-speaker meetings)](#echo-cancellation-open-speaker-meetings)
 - [Routing call audio (Zoom, Slack, Meet, Bluetooth)](#routing-call-audio-zoom-slack-meet-bluetooth)
 - [Verify your routing on a real call](#verify-your-routing-on-a-real-call)
@@ -61,10 +62,12 @@ Each track is transcribed separately, every segment is tagged by its track of
 origin, and the two are interleaved by timestamp into one transcript with
 `[You]` / `[Remote]` labels — no diarization guessing over a blended track.
 
-Attribution is **You vs. Remote** only: your microphone is always `[You]`, and
-everyone on the far side shares the single `[Remote]` label — individual remote
-speakers are **not** separated (splitting them is a planned enhancement; see the
-note below).
+By default, attribution is **You vs. Remote** only: your microphone is always
+`[You]`, and everyone on the far side shares one `[Remote]` label. To tell the
+far-side people apart — `[Remote 1]`, `[Remote 2]`, … — enable the opt-in
+[remote-track diarization](#splitting-remote-into-per-speaker-labels) described
+below. Either way, `[You]` is never diarized, so your own voice is always
+cleanly separated by track of origin.
 
 > **On open speakers without a headset,** your mic records the remote audio
 > playing aloud, so the You track becomes an echo of Remote. Run
@@ -75,15 +78,50 @@ note below).
 Notes:
 
 - Local vs remote is decided by track of origin, so labeling is reliable even
-  when both sides overlap. pyannote diarization is **reserved** only for the
-  optional future case of splitting multiple remote speakers on the system
-  track (deferred — dual mode ships with a single `Remote` label).
+  when both sides overlap. To split the far side into individual people, turn on
+  [remote-track diarization](#splitting-remote-into-per-speaker-labels) — it runs
+  pyannote on the system track only, never on your mic.
 - Silent-tail trimming is **skipped** in dual mode, because per-track trimming
   would desync turn ordering.
 - Dual honors `RECORD_BACKEND`; use `RECORD_BACKEND=pw-record` for Bluetooth
   HSP/HFP headsets (see [Bluetooth](#routing-call-audio-zoom-slack-meet-bluetooth)).
 - The existing mixed `AUDIO_SOURCE_TYPE=both` mode (one blended WAV) remains
   available as a fallback.
+
+## Splitting Remote into per-speaker labels
+
+By default every far-side voice shares one `[Remote]` label. When a call has
+several remote people and you want to know which of them said what, turn on
+**remote-track diarization**: ShepitNote runs pyannote on the *system track
+only* and splits `[Remote]` into `[Remote 1]`, `[Remote 2]`, … ordered by who
+spoke first. Your microphone track is **never** diarized, so `[You]` stays a
+clean, guess-free split by track of origin — the diarization only ever runs on
+the far side.
+
+Enable it per run or in `.shepitnoterc`:
+
+```bash
+DUAL_REMOTE_DIARIZATION=true AUDIO_SOURCE_TYPE=dual ./shepitnote meeting
+```
+
+It is **opt-in and best-effort**:
+
+- Requires an `HF_TOKEN` (the same HuggingFace token used elsewhere for pyannote
+  — see [Diarization setup](DIARIZATION.md)) and `pyannote.audio` installed
+  (`pip install pyannote.audio`).
+- If the token is missing, pyannote is not installed, or diarization fails for
+  any reason, the meeting still completes with a single `[Remote]` label — the
+  base dual-track flow never gains a hard dependency.
+- If only one far-side speaker is detected, the plain `[Remote]` label is kept
+  (numbering appears only when 2+ are found).
+- Optional hints when you know the room: `DUAL_REMOTE_SPEAKERS=N` fixes the
+  far-side count, or `DUAL_REMOTE_MIN_SPEAKERS` / `DUAL_REMOTE_MAX_SPEAKERS`
+  bound it. Leave them unset to auto-detect.
+
+The split adds a diarization pass over the system track, so processing a dual
+meeting takes longer with it on. Speaker labels are still `[Remote N]`, not real
+names — run [`./shepitnote label`](DIARIZATION.md) afterwards if you want to
+rename them.
 
 ## Echo cancellation (open-speaker meetings)
 
