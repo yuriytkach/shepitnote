@@ -1,13 +1,17 @@
-# HushNote
+# ShepitNote
 
-**Privacy-first meeting transcription and voice-to-text tool for Linux**
+**Private, local, multilingual meeting notes for Linux — transcribe, label speakers, summarize, and publish, all on your own machine.**
 
-HushNote is a local-only, offline-capable voice transcription and meeting summarization tool. All processing happens on your machine using local AI models — no cloud services, no data sharing, complete privacy.
+ShepitNote records a meeting, transcribes it with faster-whisper, labels who said what, and summarizes it with a local LLM (Ollama) — then, at your choice, publishes the full notes to Confluence and a short TL;DR to Slack. Everything runs locally: no cloud services, no data sharing, complete privacy. The name is from Ukrainian *шепіт* ("whisper") — a nod to the quiet, local ethos and to the Whisper model under the hood.
+
+It's built for meetings that mix **Ukrainian, Russian, and English** (with English tech terms), adding dual-track *You/Remote* capture, per-meeting language selection, tech-term accuracy tuning, and a guided review-then-confirm publishing flow on top of the original pipeline.
+
+> A fork of **[peteonrails/hushnote](https://github.com/peteonrails/hushnote)** (MIT, © Peter Jackson), extended for Linux/PipeWire, multilingual meetings, and Confluence/Slack publishing. See [Credits](#credits).
 
 ## Features
 
 - **🎙️ Audio Recording**: Capture system audio, microphone, both mixed, or two synchronized You/Remote tracks (dual mode) via PulseAudio/PipeWire
-- **📝 Speech-to-Text Transcription**: Convert audio to text using faster-whisper (offline, GPU-accelerated, auto language detection)
+- **📝 Speech-to-Text Transcription**: Convert audio to text using faster-whisper (offline; CPU by default, NVIDIA GPU when available; per-meeting or auto language detection)
 - **🔤 Tech-term Accuracy**: Bias decoding with hotwords / an initial prompt and normalize phonetic Cyrillic renderings of English terms (Kubernetes, deploy, ...) with a per-language glossary applied before summarization
 - **✂️ Silent Tail Trimming**: Automatically detects and removes silent tails from recordings (e.g. when you forget to stop recording) using binary search — fast regardless of file length
 - **👥 Speaker Diarization**: Identify who spoke when with interactive speaker labeling
@@ -16,24 +20,23 @@ HushNote is a local-only, offline-capable voice transcription and meeting summar
 - **🔗 Post-Summary Hook**: Run any script after summarization completes — upload to Outline, Notion, a webhook, or anything else
 - **🖥️ Guided Terminal Flow**: `hushnote meeting` walks record → review (language/transcript/summary) → edit title → confirm-gated publish to Confluence/Slack; nothing is sent without an explicit yes, and it works over SSH
 - **🔒 100% Private**: All processing happens locally — no internet required after setup
-- **⚡ GPU Acceleration**: AMD ROCm and NVIDIA CUDA supported, with automatic CPU fallback
+- **⚡ CPU-first, GPU-optional**: runs on CPU by default (fast on modern multi-core CPUs) and uses an NVIDIA GPU automatically when present, with CPU fallback on out-of-memory. faster-whisper has no AMD/ROCm backend, so on AMD systems transcription runs on CPU — GPU acceleration there (whisper.cpp + Vulkan) is on the roadmap
 
 ## Installation
 
 ### System Requirements
 
-- Linux (tested on CachyOS/Arch)
+- Linux with PipeWire or PulseAudio
 - Python 3.10+
 - ffmpeg
-- PulseAudio or PipeWire
 - Ollama (for summarization)
-- Optional: GPU with ROCm or CUDA
+- Optional: an NVIDIA GPU (CUDA) for faster transcription/diarization — not required; CPU works well
 
 ### Quick Install
 
 ```bash
-git clone https://github.com/peteonrails/hushnote.git
-cd hushnote
+git clone https://github.com/yuriytkach/yt-hushnote.git
+cd yt-hushnote
 
 # Create a virtual environment
 python -m venv venv
@@ -55,7 +58,12 @@ ollama pull llama3.1:8b
 ./hushnote --help
 ```
 
-**Arch/CachyOS system dependencies:**
+**System dependencies — Debian / Ubuntu / KDE neon:**
+```bash
+sudo apt install ffmpeg pipewire-pulse python3-venv
+```
+
+**Arch / CachyOS:**
 ```bash
 yay -S ffmpeg pipewire-pulse python   # PipeWire
 # or
@@ -147,7 +155,7 @@ to confirm the explicit codes behave for each.
 Meetings that mix Ukrainian/Russian speech with English programming terms hit two
 Whisper failure modes: English tech terms (Kubernetes, deploy, Helm chart) get
 rendered **phonetically in Cyrillic**, and a single track with both ru and uk
-speakers degrades whichever language wasn't chosen. HushNote adds two independent,
+speakers degrades whichever language wasn't chosen. ShepitNote adds two independent,
 **opt-in** layers to fix the first problem (and soften the second). With none of
 the settings below configured, behavior is identical to before.
 
@@ -173,7 +181,7 @@ WHISPER_INITIAL_PROMPT="We discuss Kubernetes, deploys, Helm charts, Jenkins, Gi
 ```
 
 faster-whisper applies **hotwords only when no initial prompt is set**, so
-HushNote passes only one of the two (initial prompt takes precedence) to keep
+ShepitNote passes only one of the two (initial prompt takes precedence) to keep
 behavior deterministic. Keep the seed list modest — an overly long or aggressive
 bias can cause hallucinated insertions of the seeded terms.
 
@@ -212,7 +220,7 @@ cp glossary.txt.example    glossary.txt      # shared, cross-language
 ```
 
 **Language resolution.** The glossary is per-language, but at summary time only
-the `.txt` transcript exists. HushNote picks the language in this order, never
+the `.txt` transcript exists. ShepitNote picks the language in this order, never
 crashing: (1) the explicit `-l` / `WHISPER_LANGUAGE`; else (2) the language
 recorded in the sibling transcription JSON (`*_speakers_labeled.json`, `*.json`,
 or `*.voice.json` — present for diarized and dual meetings, and for any explicit
@@ -355,7 +363,7 @@ as a clear error rather than silently continuing.
 ### Dual-track (You/Remote) recording
 
 For calls where you want reliable "who said what" without diarization, set
-`AUDIO_SOURCE_TYPE=dual`. HushNote records two time-synchronized tracks from a
+`AUDIO_SOURCE_TYPE=dual`. ShepitNote records two time-synchronized tracks from a
 single command — your microphone (You) and the system sink monitor (Remote):
 
 ```bash
@@ -401,7 +409,7 @@ record → WAV
 Recordings are organized by date and meeting:
 
 ```
-~/meeting-notes/
+recordings/                                       # default; override with RECORDINGS_DIR
 └── 20260310/
     └── meeting_20260310_090012/
         ├── meeting_20260310_090012.mp3           # trimmed audio (kept by default)
@@ -438,7 +446,7 @@ Use this to upload to Outline, Notion, a webhook, or any other destination. See 
 
 ### Confluence publishing
 
-HushNote ships a post-summary hook, `hooks/confluence_publish.py`, that converts each
+ShepitNote ships a post-summary hook, `hooks/confluence_publish.py`, that converts each
 summary to Confluence storage format and creates — or, on re-run, updates — a page in a
 configured space (issue #3). Point `POST_SUMMARY_HOOK` at it to enable:
 
@@ -493,7 +501,7 @@ fails (missing config, API/network error) the hook exits non-zero, so hushnote d
 
 ### Slack publishing
 
-HushNote ships a second post-summary hook, `hooks/slack_publish.py`, that posts a **short**
+ShepitNote ships a second post-summary hook, `hooks/slack_publish.py`, that posts a **short**
 summary of each meeting to Slack (issue #4). It runs a distinct, terser second Ollama pass over
 the summary — a 3-5 bullet TL;DR plus action items, separate from the full notes — renders it as
 Slack mrkdwn, appends a link to the Confluence page when one exists, and posts it via an incoming
@@ -579,14 +587,16 @@ systemctl status ollama
 ollama list
 ```
 
-**GPU out of memory:** HushNote automatically falls back to CPU if CUDA OOM occurs during model load or transcription.
+**GPU out of memory:** ShepitNote automatically falls back to CPU if CUDA OOM occurs during model load or transcription.
 
 **Recording has a long silent tail:** Run `hushnote trim FILE` to detect and remove it. The binary search scans ~10 windows to find the content boundary regardless of file length.
 
 ## License
 
-MIT. See LICENSE file.
+MIT — see the [LICENSE](LICENSE) file. The original copyright (© 2025 Peter Jackson) is retained as required by the license.
 
 ## Credits
+
+ShepitNote is a fork of **[hushnote](https://github.com/peteonrails/hushnote)** by Peter Jackson ([@peteonrails](https://github.com/peteonrails)), used under the MIT License. The original recording → transcription → summarization pipeline and the post-summary hook design come from that project; this fork adds dual-track You/Remote capture, uk/ru/en language handling, tech-term accuracy (hotwords + glossary), Confluence/Slack publishing with a dispatcher, and the guided `hushnote meeting` flow.
 
 Built on top of [faster-whisper](https://github.com/guillaumekln/faster-whisper), [Ollama](https://ollama.ai), [pyannote.audio](https://github.com/pyannote/pyannote-audio), and [ffmpeg](https://ffmpeg.org).
