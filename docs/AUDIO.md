@@ -61,6 +61,11 @@ Each track is transcribed separately, every segment is tagged by its track of
 origin, and the two are interleaved by timestamp into one transcript with
 `[You]` / `[Remote]` labels — no diarization guessing over a blended track.
 
+Attribution is **You vs. Remote** only: your microphone is always `[You]`, and
+everyone on the far side shares the single `[Remote]` label — individual remote
+speakers are **not** separated (splitting them is a planned enhancement; see the
+note below).
+
 > **On open speakers without a headset,** your mic records the remote audio
 > playing aloud, so the You track becomes an echo of Remote. Run
 > **`./shepitnote aec on`** before the call to cancel it in real time — see

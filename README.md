@@ -14,7 +14,7 @@ Upstream **[hushnote](https://github.com/peteonrails/hushnote)** is an excellent
 
 **What this fork adds on top of hushnote:**
 
-- **🎧 Dual-track You/Remote capture** — records your mic and the call audio as two synchronized tracks and labels every line by its origin, so "who said what" is reliable without diarization guessing. → [docs/AUDIO.md](docs/AUDIO.md#dual-track-youremote-recording)
+- **🎧 Dual-track You/Remote capture** — records your mic and the call audio as two synchronized tracks and labels every line by its origin (You vs. Remote), so your own voice is always cleanly separated — no diarization guessing. Everyone on the far side currently shares one `Remote` label; per-speaker splitting of the remote track is a planned add-on. → [docs/AUDIO.md](docs/AUDIO.md#dual-track-youremote-recording)
 - **🔊 Real-time echo cancellation** — a one-command WebRTC toggle (`aec on`/`off`) so meetings on open laptop speakers (no headset) don't record the remote side back through your mic. → [docs/AUDIO.md](docs/AUDIO.md#echo-cancellation-open-speaker-meetings)
 - **🌐 First-class uk / ru / en** — explicit per-meeting language choice that fixes Ukrainian being mislabeled as Russian, `large-v3` by default, plus English tech-term accuracy via hotwords + a per-language glossary. → [docs/LANGUAGE.md](docs/LANGUAGE.md)
 - **📤 Confluence + Slack publishing** — full notes to a Confluence page (created/updated idempotently) and a short TL;DR to Slack, with a dispatcher to do both. → [docs/PUBLISHING.md](docs/PUBLISHING.md)
@@ -130,7 +130,7 @@ Options:
 A short intro to each headline capability — follow the link for the full guide.
 
 ### Dual-track You/Remote + echo cancellation
-For calls, set `AUDIO_SOURCE_TYPE=dual` to record your mic (**You**) and the call audio (**Remote**) as two synchronized tracks, interleaved into one `[You]`/`[Remote]` transcript — no diarization guessing. On open speakers without a headset, run `./shepitnote aec on` first so your mic doesn't record the remote side back as an echo (`aec off` restores everything). → **[docs/AUDIO.md](docs/AUDIO.md)**
+For calls, set `AUDIO_SOURCE_TYPE=dual` to record your mic (**You**) and the call audio (**Remote**) as two synchronized tracks, interleaved into one `[You]`/`[Remote]` transcript — no diarization guessing. Attribution is **You vs. Remote** by track of origin, so your voice is never mixed up with the call; everyone on the far side shares a single `[Remote]` label (per-speaker diarization of the remote track is a planned add-on). On open speakers without a headset, run `./shepitnote aec on` first so your mic doesn't record the remote side back as an echo (`aec off` restores everything). → **[docs/AUDIO.md](docs/AUDIO.md)**
 
 ### Multilingual (uk / ru / en) + tech terms
 Set the language per meeting (`-l uk|ru|en`) to avoid Ukrainian being transcribed as Russian, and bias English tech terms with hotwords + a per-language glossary applied before summarization. → **[docs/LANGUAGE.md](docs/LANGUAGE.md)**
