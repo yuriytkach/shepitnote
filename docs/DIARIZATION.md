@@ -475,13 +475,6 @@ The HuggingFace token is only used to download models once. After that, everythi
   - Models: tiny (75MB) to large-v3 (3GB)
   - See main README for Whisper details
 
-## Examples
-
-See [examples/](examples/) directory for sample outputs:
-- `example_diarized.txt` - Two-person interview transcript
-- `example_meeting.md` - Four-person team meeting
-- `example_podcast.srt` - Podcast with subtitles
-
 ## Contributing
 
 Interested in improving diarization? Areas for contribution:
@@ -492,7 +485,7 @@ Interested in improving diarization? Areas for contribution:
 - Improved speaker labeling UX
 - Multi-language speaker detection
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) for details.
+See [CONTRIBUTING.md](../CONTRIBUTING.md) for details.
 
 ## Support
 
