@@ -165,6 +165,24 @@ check_dependencies() {
     fi
 }
 
+# Verify the Python worker environment (venv + faster-whisper) needed to
+# transcribe/summarize. Kept separate from check_dependencies() because
+# record-only commands don't need it. Call this BEFORE recording in the
+# record-then-process flows so a missing setup fails immediately with a clear
+# message instead of after a full meeting has already been captured.
+check_python_env() {
+    if [ ! -x "$PYTHON" ]; then
+        log_error "Python environment is not set up (missing: $PYTHON)."
+        log_error "Run ./setup.sh once to create venv/ and install faster-whisper."
+        exit 1
+    fi
+    if ! "$PYTHON" -c "import faster_whisper" 2>/dev/null; then
+        log_error "faster-whisper is not installed in the venv ($PYTHON)."
+        log_error "Run ./setup.sh, or: \"$PYTHON\" -m pip install faster-whisper requests"
+        exit 1
+    fi
+}
+
 record_meeting() {
     local duration=""
     local output_file=""
@@ -486,6 +504,10 @@ full_workflow() {
         log_info "Starting full meeting workflow..."
     fi
     echo ""
+
+    # Fail fast if the transcription environment is missing, BEFORE recording, so
+    # we never capture a full meeting only to die at the transcribe step.
+    check_python_env
 
     # Step 1: Record
     log_info "Step 1: Recording audio..."
@@ -1750,6 +1772,10 @@ meeting_ui() {
     log_info "Publishing is confirm-gated; nothing is sent automatically."
     echo ""
 
+    # Fail fast if the transcription environment is missing, BEFORE recording, so
+    # we never capture a full meeting only to die at the transcribe step.
+    check_python_env
+
     # Step 1: Record (reuses record_meeting; Ctrl+C or -d stops recording).
     log_info "Step 1/4: Recording (press Ctrl+C to stop)..."
     local recording_result_file="/tmp/shepitnote_meeting_$$"
@@ -1962,6 +1988,15 @@ main() {
 
     local command="$1"
     shift
+
+    # Commands that transcribe need the Python worker env; verify it up front so
+    # they fail with a clear, actionable message instead of a cryptic
+    # missing-binary error mid-run. (full/meeting check it before recording.)
+    case "$command" in
+        transcribe|process|process-last)
+            check_python_env
+            ;;
+    esac
 
     case "$command" in
         record)

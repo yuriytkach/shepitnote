@@ -96,6 +96,25 @@ def _build_transcribe_kwargs(language=None, initial_prompt=None, hotwords=None, 
     return kwargs
 
 
+def _model_is_cached(model_size: str) -> bool:
+    """Best-effort check whether a Whisper model is already available locally.
+
+    Used only to tailor the load message (download-first vs. already-cached), so a
+    wrong guess is cosmetic. A local directory/path is obviously present; the
+    standard size names map to the `Systran/faster-whisper-<size>` Hugging Face
+    repo, cached under HF_HOME (or ~/.cache/huggingface)/hub.
+    """
+    try:
+        if Path(model_size).exists():
+            return True
+        hf_home = os.environ.get("HF_HOME")
+        cache_root = Path(hf_home) if hf_home else Path.home() / ".cache" / "huggingface"
+        repo_dir = cache_root / "hub" / f"models--Systran--faster-whisper-{model_size}"
+        return repo_dir.is_dir()
+    except OSError:
+        return False
+
+
 def transcribe_audio(
     audio_file: str,
     model_size: str = "large-v3",
@@ -148,7 +167,19 @@ def transcribe_audio(
     compute_type = "int8_float16" if device == "cuda" else "int8"
 
     def _load_model(dev, ctype):
-        print(f"Loading Whisper model: {model_size} on {dev} ({ctype})", file=sys.stderr)
+        if _model_is_cached(model_size):
+            print(f"Loading Whisper model '{model_size}' on {dev} ({ctype})...",
+                  file=sys.stderr)
+        else:
+            # First use of this model: faster-whisper downloads it from Hugging
+            # Face. That step is network-bound (low CPU) and, without this notice,
+            # looks like a hang. huggingface_hub prints its own progress below.
+            print(f"Downloading + loading Whisper model '{model_size}' on {dev} "
+                  f"({ctype})...", file=sys.stderr)
+            print("  First run for this model — fetching it from Hugging Face. "
+                  "This can take a few minutes (large-v3 is ~3 GB); progress "
+                  "appears below.", file=sys.stderr)
+        sys.stderr.flush()
         return WhisperModel(model_size, device=dev, compute_type=ctype)
 
     def _run_transcription(mdl):

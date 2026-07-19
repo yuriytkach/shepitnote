@@ -1,28 +1,43 @@
-# Setup Complete! ✓
+# Setup
 
-Your meeting transcription system is ready to use.
+Get the meeting transcription system running in three steps.
 
-## What's Been Set Up
+## 1. System dependencies
 
-✓ **System Dependencies**: ffmpeg, pactl (PipeWire), Python 3.13
-✓ **Python Environment**: Virtual environment created at `./venv/`
-✓ **Python Packages**: faster-whisper, requests (installed in venv)
-✓ **Ollama**: Running with 7 models available
-✓ **Scripts**: All executable and configured
-✓ **Recordings Directory**: `./recordings/` created
+Install these with your package manager (names vary by distro):
 
-## Available Ollama Models
+- **ffmpeg** — recording + audio conversion
+- **pactl** (`pulseaudio-utils`, or `pipewire-pulse` on PipeWire systems) — audio routing
+- **python3** (3.9+) with the `venv` module (`python3-venv` on Debian/Ubuntu)
+- **[Ollama](https://ollama.com)** — local LLM for summarization
 
-Your system has these models ready for summarization:
-- `llama3.2:1b` - Fastest (1.2B parameters)
-- `mistral:7b` - Good balance (7.2B)
-- `qwen2.5-coder:7b` - Code-focused (7.6B)
-- `gemma2:9b` - Google model (9.2B)
-- `qwen2.5-coder:14b` - Better quality (14.8B, **recommended**)
-- `llava:13b` - Multimodal (13B)
-- `mixtral:8x7b` - Best quality (46.7B, slower)
+## 2. Python environment (`./setup.sh`)
 
-**Note**: The scripts default to `llama3.1:8b`, but you don't have that model. Use `-o` to specify one of the above models.
+The worker scripts run inside a virtual environment (`./venv/`). Create it and
+install the Python dependencies (faster-whisper, huggingface-hub, requests) with:
+
+```bash
+./setup.sh
+```
+
+This is idempotent — re-run it any time. To also pre-download a Whisper model so
+your first meeting doesn't pause to fetch it (large-v3 is ~3 GB):
+
+```bash
+./setup.sh --model small        # or: base | medium | large-v3
+```
+
+> Without a working venv, `shepitnote` now fails fast **before** recording with a
+> clear message telling you to run `./setup.sh` — so you never lose a meeting to a
+> missing dependency.
+
+## 3. A summarization model in Ollama
+
+Summaries use whatever Ollama model you pass with `-o` (or set `OLLAMA_MODEL` in
+`.shepitnoterc`). List what you have with `ollama list`, and pull one if needed,
+e.g. `ollama pull llama3.1:8b`. Pick a **local** model — larger instruction-tuned
+models (9B+) summarize multilingual transcripts best. Avoid Ollama `*:cloud`
+models: they send your transcript off-machine, defeating the local-only design.
 
 ## Quick Start
 
@@ -51,16 +66,13 @@ answer or EOF means "do not publish". It uses plain line prompts, so it works ov
 confirm-gated publishing") for details.
 
 ### Available audio sources:
-You have several microphones detected:
-- **HD Pro Webcam C920** (ID: 98) - Webcam mic
-- **USB Audio Mic1** (ID: 64) - USB microphone
-- **USB Audio Line1** (ID: 65) - Line input
+The script records from your **default** PulseAudio/PipeWire source. List the
+sources detected on your machine, then switch the default if needed:
 
-The script will use your default source. To change:
 ```bash
-pactl set-default-source 98  # Use webcam mic
-# or
-pactl set-default-source 64  # Use USB mic
+pactl list short sources          # see available sources (name / ID)
+pactl get-default-source          # what's currently default
+pactl set-default-source <NAME>   # switch to a specific mic
 ```
 
 ### Dual-track capture (You/Remote)
