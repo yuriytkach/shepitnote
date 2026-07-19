@@ -8,6 +8,20 @@ It's built for meetings that mix **Ukrainian, Russian, and English** (with Engli
 
 > A fork of **[peteonrails/hushnote](https://github.com/peteonrails/hushnote)** (MIT, © Peter Jackson), extended for Linux/PipeWire, multilingual meetings, and Confluence/Slack publishing. See [Credits](#credits).
 
+## Who it's for — and how it differs from hushnote
+
+Upstream **[hushnote](https://github.com/peteonrails/hushnote)** is an excellent general-purpose, privacy-first meeting recorder → transcriber → summarizer for Linux. ShepitNote keeps all of that and specializes it for one audience: **multilingual (Ukrainian / Russian / English) engineering teams** who want clean, attributed meeting notes pushed into the tools they already live in — with nothing leaving the machine unless they say so.
+
+| | hushnote (upstream) | ShepitNote (this fork) |
+|---|---|---|
+| **Language** | auto-detect, one language per file | first-class **uk / ru / en** — explicit per-meeting choice (fixes Ukrainian being mislabeled as Russian), `large-v3` default, plus **English tech-term accuracy** via hotwords + a per-language Cyrillic→Latin glossary |
+| **Who said what** | one mixed track (diarization guesses) | **dual-track You/Remote**, labeled by track of origin — no diarization guessing |
+| **Publishing** | one generic post-summary hook | first-class **Confluence** (full notes) + **Slack** (short TL;DR) publishers, and a dispatcher to run both |
+| **Control** | the hook fires automatically | a guided **review → per-target confirm** flow (`shepitnote meeting`) — nothing publishes without an explicit yes |
+| **Privacy** | 100% local | 100% local (unchanged) |
+
+Rule of thumb: if your meetings are English-only and you just want a local transcript + summary, upstream hushnote is a great fit. If they mix Ukrainian/Russian with English tech vocabulary and you publish notes to Confluence and Slack, that's exactly what ShepitNote is tuned for.
+
 ## Features
 
 - **🎙️ Audio Recording**: Capture system audio, microphone, both mixed, or two synchronized You/Remote tracks (dual mode) via PulseAudio/PipeWire
