@@ -1783,8 +1783,11 @@ meeting_ui() {
     [ -n "$duration" ] && record_args+=(-d "$duration")
     [ -n "$title" ] && record_args+=(-t "$title")
 
+    # Suppress record_audio.sh's interactive title prompt: this guided flow sets
+    # the title in its own step (3b) after showing the summary, so a second prompt
+    # here would be redundant and would block before transcription.
     local rec_exit=0
-    record_meeting "${record_args[@]}" > "$recording_result_file" || rec_exit=$?
+    SHEPITNOTE_SKIP_TITLE_PROMPT=1 record_meeting "${record_args[@]}" > "$recording_result_file" || rec_exit=$?
     log_debug "Recording exit code: $rec_exit"
 
     local audio_file=""
@@ -2000,7 +2003,23 @@ main() {
 
     case "$command" in
         record)
-            record_meeting "$@"
+            # Capture the path via a temp file (not $(...)) to preserve the
+            # Ctrl+C-to-stop behavior, then point the user at the next step so a
+            # record-only run doesn't look like it stalled.
+            local rec_result_file="/tmp/shepitnote_reccmd_$$"
+            local rec_rc=0
+            record_meeting "$@" > "$rec_result_file" || rec_rc=$?
+            local rec_path=""
+            if [ -f "$rec_result_file" ]; then
+                rec_path=$(cat "$rec_result_file"); rm -f "$rec_result_file"
+            fi
+            [ -n "$rec_path" ] && echo "$rec_path"
+            if [ -n "$rec_path" ] && [ -f "$rec_path" ]; then
+                echo "" >&2
+                log_info "Record-only: transcription/summary do NOT run automatically."
+                log_info "To transcribe + summarize this recording, run:"
+                log_info "  ./shepitnote process-last"
+            fi
             ;;
         transcribe)
             if [ $# -eq 0 ]; then

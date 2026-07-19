@@ -232,12 +232,18 @@ if [ "${AUDIO_SOURCE_TYPE:-microphone}" = "dual" ]; then
     echo "  Voice (You):     $VOICE_FILE" >&2
     echo "  System (Remote): $SYSTEM_FILE" >&2
 
-    # Prompt for title if not provided and a terminal is available
-    if [ -z "$TITLE" ]; then
-        if read -p "Meeting title (optional): " TITLE </dev/tty 2>/dev/null; then
-            : # title captured
+    # Prompt for title if not provided, interactive, and not suppressed. The
+    # guided `meeting` flow sets its own title later, so it suppresses this to
+    # avoid a second prompt and a confusing block before processing. Announced +
+    # timed so it can never look like a silent hang (the old unbounded read did).
+    if [ -z "$TITLE" ] && [ -z "${SHEPITNOTE_SKIP_TITLE_PROMPT:-}" ] && { : </dev/tty; } 2>/dev/null; then
+        echo "" >&2
+        echo ">>> Enter a meeting title, or press Enter to skip (auto-skips in 60s):" >&2
+        if IFS= read -r -t 60 -p "    Title: " TITLE </dev/tty 2>/dev/null; then
+            : # title captured (may be empty if the user just pressed Enter)
         else
             TITLE=""
+            echo "    (skipped — no title set)" >&2
         fi
     fi
 
@@ -274,12 +280,18 @@ elif [ -f "$OUTPUT_FILE" ]; then
     echo "" >&2
     echo "Recording saved to: $OUTPUT_FILE" >&2
 
-    # Prompt for title if not provided and a terminal is available
-    if [ -z "$TITLE" ]; then
-        if read -p "Meeting title (optional): " TITLE </dev/tty 2>/dev/null; then
-            : # title captured
+    # Prompt for title if not provided, interactive, and not suppressed. The
+    # guided `meeting` flow sets its own title later, so it suppresses this to
+    # avoid a second prompt and a confusing block before processing. Announced +
+    # timed so it can never look like a silent hang (the old unbounded read did).
+    if [ -z "$TITLE" ] && [ -z "${SHEPITNOTE_SKIP_TITLE_PROMPT:-}" ] && { : </dev/tty; } 2>/dev/null; then
+        echo "" >&2
+        echo ">>> Enter a meeting title, or press Enter to skip (auto-skips in 60s):" >&2
+        if IFS= read -r -t 60 -p "    Title: " TITLE </dev/tty 2>/dev/null; then
+            : # title captured (may be empty if the user just pressed Enter)
         else
             TITLE=""
+            echo "    (skipped — no title set)" >&2
         fi
     fi
 
