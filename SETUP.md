@@ -29,13 +29,13 @@ Your system has these models ready for summarization:
 ### Test with a 10-second recording:
 ```bash
 # Record 10 seconds, transcribe, and summarize
-./meeting-notes.sh full -d 10 -m tiny -o qwen2.5-coder:14b
+./hushnote full -d 10 -m tiny -o qwen2.5-coder:14b
 ```
 
 ### For real meetings:
 ```bash
 # Start recording (press Ctrl+C to stop)
-./meeting-notes.sh full -o qwen2.5-coder:14b
+./hushnote full -o qwen2.5-coder:14b
 ```
 
 ### Guided flow (review + confirm before publishing):
@@ -93,18 +93,90 @@ silent; use the PipeWire backend instead:
 AUDIO_SOURCE_TYPE=dual RECORD_BACKEND=pw-record ./hushnote full
 ```
 
+## Capturing calls: Zoom, Slack huddles, Bluetooth
+
+Capture is **sink-monitor based**, so it is app-agnostic: the remote side of any
+call — Zoom (native app or browser), Slack huddles, Google Meet, Discord — plays
+through your **default sink**, and hushnote records that sink's `.monitor`. You do
+not configure anything per app; you configure the *default sink*.
+
+Pick the mode with `AUDIO_SOURCE_TYPE`:
+
+| Mode | What you get | Use when |
+|------|--------------|----------|
+| `dual` | two tracks: **You** (mic) + **Remote** (sink monitor), labeled by origin | recommended for calls — clean You/Remote notes |
+| `both` | one track mixing mic + sink monitor | you just want a single blended recording |
+| `monitor` | sink monitor only (the remote side) | you only need what the others said |
+| `microphone` (default) | mic only | in-person / dictation, no call audio |
+
+```bash
+AUDIO_SOURCE_TYPE=dual ./hushnote meeting -o mistral:7b   # recommended for a call
+```
+
+### Route the call audio to the default sink
+
+The monitor track is only non-silent if the call app **plays out through the
+default sink**. Before a call, check:
+
+1. `pactl get-default-sink` is the device you actually listen on (speakers/headset).
+2. The call app is sending audio to that same device.
+
+**Zoom quirk:** Zoom has its *own* speaker selection (Settings → Audio → Speaker),
+independent of the system default. If Zoom is set to a different output device, the
+default sink's monitor is **silent** even though you hear the call. Fix: set Zoom's
+Speaker to *Same as System* (or to whatever your default sink is). **Slack huddles**
+and browser-based Meet follow the system default, so they need no special step.
+
+### Bluetooth headsets (A2DP vs HSP/HFP)
+
+A Bluetooth headset runs in one of two profiles:
+
+- **A2DP** — high quality, **output only** (no mic). Great for listening, but the
+  headset mic is unavailable.
+- **HSP/HFP** — bidirectional (mic + speaker) at lower quality; this is the profile
+  that is active during a call so your mic works.
+
+In **HSP/HFP**, `ffmpeg -f pulse` sometimes captures **silence** from the sink
+monitor. If that happens, switch the recorder backend to PipeWire's `pw-record`:
+
+```bash
+AUDIO_SOURCE_TYPE=dual RECORD_BACKEND=pw-record ./hushnote meeting
+```
+
+Set `RECORD_BACKEND=pw-record` in `.hushnoterc` if you always record over a BT headset.
+
+### Verify your routing on a real call (do this once)
+
+Join a test call (Zoom has a built-in test meeting; or a Slack huddle with a
+colleague) and, **while the other side is talking**, record a short sample:
+
+```bash
+AUDIO_SOURCE_TYPE=dual ./hushnote full -d 15 -m tiny -o mistral:7b
+```
+
+Then, in the newest `recordings/<date>/meeting_*/` directory, confirm:
+
+- both `*.voice.wav` (your mic) and `*.system.wav` (the remote side) exist and are
+  ~15s: `ffprobe -v error -show_entries format=duration -of default=nk=1:nw=1 <file>`;
+- `*.system.wav` actually contains the **remote** voice (play it back);
+- the merged `*.txt` interleaves `[You]` and `[Remote]` lines.
+
+If `*.system.wav` is silent, the call app is not on the default sink (see the Zoom
+quirk) or you are on a BT headset in HSP/HFP (use `pw-record`). A `both`/`monitor`
+recording that is silent has the same two causes.
+
 ## Recommended Settings
 
 For best results:
 ```bash
 # Good balance (fast, decent quality)
-./meeting-notes.sh full -m base -o mistral:7b
+./hushnote full -m base -o mistral:7b
 
 # Better quality (slower)
-./meeting-notes.sh full -m small -o qwen2.5-coder:14b
+./hushnote full -m small -o qwen2.5-coder:14b
 
 # Best quality (much slower)
-./meeting-notes.sh full -m medium -o mixtral:8x7b
+./hushnote full -m medium -o mixtral:8x7b
 ```
 
 ## Language & accuracy (uk/ru/en)
@@ -149,16 +221,16 @@ section.
 
 ```bash
 # List recordings
-./meeting-notes.sh list
+./hushnote list
 
 # Record only (30 minutes)
-./meeting-notes.sh record -d 1800
+./hushnote record -d 1800
 
 # Transcribe existing audio
-./meeting-notes.sh transcribe path/to/audio.wav -m small
+./hushnote transcribe path/to/audio.wav -m small
 
 # Summarize existing transcription
-./meeting-notes.sh summarize path/to/transcript.txt -o qwen2.5-coder:14b
+./hushnote summarize path/to/transcript.txt -o qwen2.5-coder:14b
 
 # Guided flow: record, review, confirm-gated publish (SSH-friendly)
 ./hushnote meeting
@@ -175,7 +247,7 @@ If you get "llama3.1:8b not found", either:
 Try a test recording to make sure everything works!
 
 ```bash
-./meeting-notes.sh full -d 10 -m tiny -o mistral:7b
+./hushnote full -d 10 -m tiny -o mistral:7b
 ```
 
 This will:
