@@ -48,6 +48,18 @@ Transcription:
 Use markdown headings and bullet points. Do not wrap your response in a code block."""
 
 
+TRANSLATE_PROMPT = """Translate the following meeting transcript into English.
+
+Rules:
+- Keep each line's leading [Speaker] label exactly as-is.
+- Translate faithfully and completely; do NOT summarize, condense, or omit anything.
+- Preserve technical and product names, and any English words already present.
+- Output ONLY the translated transcript — no preamble, no notes.
+
+Transcript:
+{transcription}"""
+
+
 def query_ollama(prompt: str, model: str = "llama3.1:8b", ollama_url: str = DEFAULT_OLLAMA_URL) -> str:
     """
     Query Ollama API for text generation
@@ -78,7 +90,7 @@ def query_ollama(prompt: str, model: str = "llama3.1:8b", ollama_url: str = DEFA
         response = requests.post(
             f"{ollama_url}/api/generate",
             json=payload,
-            timeout=300  # 5 minute timeout
+            timeout=600  # 10 min: a translate pass is a longer generation than a summary
         )
         response.raise_for_status()
         return response.json()["response"]
@@ -141,6 +153,25 @@ def summarize_meeting(
     return {"summary": _strip_code_fence(text)}
 
 
+def translate_to_english(transcription: str, model: str, ollama_url: str) -> str:
+    """Translate a transcript to English via Ollama, preserving [Speaker] labels.
+
+    Used for the opt-in translate-first flow: for non-English meetings (e.g. ru/uk),
+    translating before summarizing gives markedly better notes than asking one model
+    to translate + summarize + structure in a single pass, because the summary model
+    then works in the language it is strongest in. Returns the English transcript
+    (code fences stripped); on any failure query_ollama exits, matching the rest of
+    the pipeline's fail-fast behavior.
+    """
+    print(f"Translating transcript to English using {model}...", file=sys.stderr)
+    text = query_ollama(
+        TRANSLATE_PROMPT.format(transcription=transcription),
+        model=model,
+        ollama_url=ollama_url,
+    )
+    return _strip_code_fence(text)
+
+
 def _strip_code_fence(text: str) -> str:
     """Strip wrapping code fences that models sometimes add around markdown output."""
     import re
@@ -183,8 +214,26 @@ def main():
                             "(default: this script's directory)")
     parser.add_argument("--no-glossary", action="store_true",
                        help="Disable glossary term normalization entirely")
+    parser.add_argument("--translate", dest="translate",
+                       action=argparse.BooleanOptionalAction, default=None,
+                       help="Translate the transcript to English before "
+                            "summarizing (better notes for non-English meetings). "
+                            "Default: off / SUMMARY_TRANSLATE env")
+    parser.add_argument("--translate-model", default=None,
+                       help="Model for the translate step (default: same as -m, "
+                            "or SUMMARY_TRANSLATE_MODEL env)")
 
     args = parser.parse_args()
+
+    # Resolve the translate-first flow: CLI flag wins, else env, else off.
+    def _env_bool(name, default=False):
+        v = os.getenv(name)
+        if v is None or not v.strip():
+            return default
+        return v.strip().lower() in ("1", "true", "yes", "on")
+
+    translate = args.translate if args.translate is not None else _env_bool("SUMMARY_TRANSLATE")
+    translate_model = args.translate_model or os.getenv("SUMMARY_TRANSLATE_MODEL") or args.model
 
     # Load transcription
     transcription = load_transcription(args.transcription_file)
@@ -205,6 +254,14 @@ def main():
             known_terms = glossary.terms_for_prompt(entries)
             print(f"Glossary: {len(entries)} rule(s) applied "
                   f"(language: {language or 'union'})", file=sys.stderr)
+
+    # Opt-in translate-first: convert the (glossary-normalized) transcript to
+    # English before summarizing. Done after the glossary pass so canonical term
+    # spellings carry into the translation.
+    if translate:
+        transcription = translate_to_english(
+            transcription, model=translate_model, ollama_url=args.ollama_url
+        )
 
     # Determine output file
     if args.output:

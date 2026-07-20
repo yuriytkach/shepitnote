@@ -2099,6 +2099,7 @@ _ui_show_file() {
 meeting_ui() {
     local duration=""
     local title=""
+    local cli_speakers=""
     local process_opts=()
 
     while [[ $# -gt 0 ]]; do
@@ -2111,7 +2112,7 @@ meeting_ui() {
             --initial-prompt) process_opts+=(--initial-prompt "$2"); shift 2 ;;
             --hotwords)       process_opts+=(--hotwords "$2"); shift 2 ;;
             --diarize)        process_opts+=(--diarize); shift ;;
-            -s|--speakers)    process_opts+=(-s "$2"); shift 2 ;;
+            -s|--speakers)    process_opts+=(-s "$2"); cli_speakers="$2"; shift 2 ;;
             -h|--help)
                 echo "Usage: $0 meeting [OPTIONS]"
                 echo ""
@@ -2182,6 +2183,27 @@ meeting_ui() {
     local summary_file="${base}_summary.md"
     local metadata_file="${base}_metadata.json"
     local hook_done_file="${base}.hook_done"
+
+    # Step 1b: for dual-track meetings with Remote diarization enabled, ask how
+    # many people were on the far side so pyannote targets that exact count rather
+    # than auto-detecting — which over-splits on compressed VoIP audio (a real
+    # 6-person call was detected as 8). Sets DUAL_REMOTE_SPEAKERS, which the dual
+    # processing path forwards to diarize.py as -s. Skipped when the count is
+    # already in the environment, was passed with -s, or this isn't a dual
+    # recording. A blank/EOF answer falls back to auto-detect (SSH/pipe-safe).
+    if [ "${DUAL_REMOTE_DIARIZATION:-false}" = "true" ] \
+       && [ -f "${base}.voice.wav" ] && [ -f "${base}.system.wav" ] \
+       && [ -z "${DUAL_REMOTE_SPEAKERS:-}" ]; then
+        local _spk="$cli_speakers"
+        [ -z "$_spk" ] && _spk=$(_ui_prompt "How many people were on the call, not counting you? (blank = auto-detect): ")
+        if [[ "$_spk" =~ ^[1-9][0-9]*$ ]]; then
+            export DUAL_REMOTE_SPEAKERS="$_spk"
+            log_info "Diarization will target $_spk remote speaker(s)."
+        else
+            log_info "Auto-detecting the number of remote speakers."
+        fi
+        echo ""
+    fi
 
     # Step 2: Transcribe + summarize via the EXISTING `process` subcommand, with
     # the automatic post-summary hook SUPPRESSED so nothing publishes here. process

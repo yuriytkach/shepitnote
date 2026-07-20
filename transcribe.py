@@ -68,7 +68,9 @@ def _normalize_language(language):
     return language.lower()
 
 
-def _build_transcribe_kwargs(language=None, initial_prompt=None, hotwords=None, beam_size=5):
+def _build_transcribe_kwargs(language=None, initial_prompt=None, hotwords=None, beam_size=5,
+                             vad_filter=None, condition_on_previous_text=None,
+                             hallucination_silence_threshold=None):
     """Build the keyword arguments for WhisperModel.transcribe().
 
     Kept as a pure, faster-whisper-free helper so the decoding-bias logic can be
@@ -83,6 +85,17 @@ def _build_transcribe_kwargs(language=None, initial_prompt=None, hotwords=None, 
     dropping hotwords when initial_prompt is set makes behavior deterministic and
     documented: initial_prompt takes precedence. Empty/whitespace-only values are
     treated as absent, so an all-empty call reproduces the pre-#8 kwargs exactly.
+
+    Anti-hallucination controls (vad_filter, condition_on_previous_text,
+    hallucination_silence_threshold) address a distinct failure: on near-silent
+    stretches — e.g. one dual-track mic while the other side is talking — Whisper
+    invents repeated tokens ("shepard shepard ...", "Спасибо. Спасибо. ...") and
+    even foreign-script text. VAD skips the non-speech regions; turning off
+    condition_on_previous_text breaks the repetition loops. Each is added to the
+    kwargs ONLY when its argument is not None, so the all-None call still
+    reproduces the historical kwargs exactly (the caller supplies the live
+    defaults). hallucination_silence_threshold requires word-level timestamps in
+    faster-whisper, so it implicitly enables word_timestamps.
     """
     kwargs = {"beam_size": beam_size}
     if language and language.strip():
@@ -93,6 +106,13 @@ def _build_transcribe_kwargs(language=None, initial_prompt=None, hotwords=None, 
         kwargs["initial_prompt"] = prompt
     elif words:
         kwargs["hotwords"] = words
+    if vad_filter is not None:
+        kwargs["vad_filter"] = bool(vad_filter)
+    if condition_on_previous_text is not None:
+        kwargs["condition_on_previous_text"] = bool(condition_on_previous_text)
+    if hallucination_silence_threshold is not None:
+        kwargs["hallucination_silence_threshold"] = float(hallucination_silence_threshold)
+        kwargs["word_timestamps"] = True
     return kwargs
 
 
@@ -123,7 +143,10 @@ def transcribe_audio(
     output_format: str = "txt",
     initial_prompt: str = None,
     hotwords: str = None,
-    cpu_threads: int = 0
+    cpu_threads: int = 0,
+    vad_filter: bool = True,
+    condition_on_previous_text: bool = False,
+    hallucination_silence_threshold: float = None
 ) -> dict:
     """
     Transcribe an audio file using faster-whisper
@@ -140,6 +163,13 @@ def transcribe_audio(
         hotwords: Optional space-separated terms to bias decoding (str or None).
             Only applied when initial_prompt is empty (faster-whisper ignores
             hotwords when initial_prompt is set).
+        vad_filter: Skip non-speech regions with VAD before decoding (default
+            True). Prevents Whisper from hallucinating text on silent stretches.
+        condition_on_previous_text: Feed the previous window's text as context
+            (default False). Left off to prevent repetition loops.
+        hallucination_silence_threshold: If set (seconds), skip long silent gaps
+            where hallucinations occur. Enables word timestamps and is slower, so
+            it is off (None) by default.
 
     Returns:
         dict with transcription results
@@ -187,7 +217,12 @@ def transcribe_audio(
                             cpu_threads=cpu_threads)
 
     def _run_transcription(mdl):
-        kwargs = _build_transcribe_kwargs(language, initial_prompt, hotwords)
+        kwargs = _build_transcribe_kwargs(
+            language, initial_prompt, hotwords,
+            vad_filter=vad_filter,
+            condition_on_previous_text=condition_on_previous_text,
+            hallucination_silence_threshold=hallucination_silence_threshold,
+        )
         segments, info = mdl.transcribe(str(audio_file), **kwargs)
         print(f"Detected language: {info.language}", file=sys.stderr)
         result_segments = []
@@ -284,6 +319,21 @@ def main():
     parser.add_argument("--hotwords", default=None,
                        help="Space-separated terms to bias decoding (applied only "
                             "when --initial-prompt is not set)")
+    parser.add_argument("--vad", dest="vad", action=argparse.BooleanOptionalAction,
+                       default=None,
+                       help="Filter non-speech with VAD before decoding "
+                            "(default on; --no-vad to disable). Removes text "
+                            "hallucinated on silent stretches. Env: WHISPER_VAD")
+    parser.add_argument("--condition-on-previous", dest="condition_on_previous",
+                       action=argparse.BooleanOptionalAction, default=None,
+                       help="Condition each window on the previous window's text "
+                            "(default off; off prevents repetition loops). "
+                            "Env: WHISPER_CONDITION_ON_PREVIOUS_TEXT")
+    parser.add_argument("--hallucination-silence-threshold", type=float, default=None,
+                       help="Skip silent gaps longer than N seconds where "
+                            "hallucinations occur (enables word timestamps; "
+                            "slower). Default: disabled. "
+                            "Env: WHISPER_HALLUCINATION_SILENCE")
     parser.add_argument("-f", "--format", default="txt",
                        choices=["txt", "json", "srt", "vtt"],
                        help="Output format (default: txt)")
@@ -311,6 +361,29 @@ def main():
     except ValueError:
         cpu_threads = 0
 
+    # Anti-hallucination controls. A CLI flag wins; otherwise fall back to the
+    # env var (exported from .shepitnoterc); otherwise the safe default (VAD on,
+    # conditioning off, silence-threshold disabled).
+    def _env_bool(name, default):
+        v = os.getenv(name)
+        if v is None or not v.strip():
+            return default
+        return v.strip().lower() in ("1", "true", "yes", "on")
+
+    vad_filter = args.vad if args.vad is not None else _env_bool("WHISPER_VAD", True)
+    condition_on_previous_text = (
+        args.condition_on_previous if args.condition_on_previous is not None
+        else _env_bool("WHISPER_CONDITION_ON_PREVIOUS_TEXT", False)
+    )
+    hallucination_silence_threshold = args.hallucination_silence_threshold
+    if hallucination_silence_threshold is None:
+        env_hst = os.getenv("WHISPER_HALLUCINATION_SILENCE")
+        if env_hst and env_hst.strip():
+            try:
+                hallucination_silence_threshold = float(env_hst)
+            except ValueError:
+                hallucination_silence_threshold = None
+
     # Transcribe
     try:
         result = transcribe_audio(
@@ -321,7 +394,10 @@ def main():
             output_format=args.format,
             initial_prompt=args.initial_prompt,
             hotwords=args.hotwords,
-            cpu_threads=cpu_threads
+            cpu_threads=cpu_threads,
+            vad_filter=vad_filter,
+            condition_on_previous_text=condition_on_previous_text,
+            hallucination_silence_threshold=hallucination_silence_threshold
         )
 
         # Save results

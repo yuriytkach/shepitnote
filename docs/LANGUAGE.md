@@ -26,6 +26,41 @@ targets an AMD APU with no usable CUDA, so it runs on CPU at roughly real-time
 (~0.5-1x), materially slower than `base`. Override per run with `-m base` /
 `-m small` or set `WHISPER_MODEL=base` when speed matters.
 
+## Removing hallucinated text (VAD + repetition control)
+
+Whisper (every size, `large-v3` included) **invents text on near-silent
+stretches** — most visibly on dual-track recordings, where one track is quiet
+while the other side talks. Symptoms in the transcript: a word or phrase repeated
+many times (`Спасибо. Спасибо. Спасибо. …`, `shepard shepard shepard`) or short
+bursts of an unrelated script (Korean/Japanese/Chinese). This garbage then
+pollutes the summary — in one real meeting a hallucinated `shepard` became a
+fictional "Shepard System" topic *and* an action item.
+
+Two settings, **on by default**, prevent it (no config needed):
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `WHISPER_VAD` | `true` | Voice-activity detection skips non-speech before decoding, so silent stretches can't be turned into words. Usually also *speeds up* CPU transcription. |
+| `WHISPER_CONDITION_ON_PREVIOUS_TEXT` | `false` | Stops feeding each window the previous window's text — the mechanism behind runaway repetition loops. |
+
+To tune per run, set the env var (it propagates to the transcriber on every path):
+
+```bash
+WHISPER_VAD=false ./shepitnote transcribe clip.wav                 # disable VAD
+WHISPER_CONDITION_ON_PREVIOUS_TEXT=true ./shepitnote process meeting.wav
+```
+
+For stubborn cases, also skip long silent gaps explicitly (slower — it enables
+word timestamps):
+
+```bash
+WHISPER_HALLUCINATION_SILENCE=2.0 ./shepitnote process meeting.wav
+```
+
+Calling the worker directly also exposes `--vad` / `--no-vad`,
+`--condition-on-previous` / `--no-condition-on-previous`, and
+`--hallucination-silence-threshold` on `transcribe.py`.
+
 ## Language selection (uk / ru / en)
 
 faster-whisper's auto-detect samples only the **first ~30 seconds** of a file
@@ -185,3 +220,45 @@ measured for you or in CI. To verify on a real mixed-language clip:
 5. Iterate: add any still-mis-rendered term to the glossary and/or
    `WHISPER_HOTWORDS` and re-run. Because everything is opt-in, an empty config
    reproduces the baseline exactly.
+
+## Summarization model & translate-first (non-English meetings)
+
+A summary is only as good as the model that writes it. On this CPU/APU box the
+sweet spot is a **Mixture-of-Experts (MoE)** model — large in total size but with
+few *active* parameters per token, so it stays fast:
+
+- **Recommended:** `qwen3:30b-a3b-instruct-2507-q4_K_M` (~18 GB; 30B total, ~3.3B
+  active/token). On a real Russian meeting it produced a better summary in **~90 s**
+  vs **~5 min** for the dense `gemma4:latest` — more accurate speaker attribution
+  and no invented topics. Install and select it with:
+
+  ```bash
+  ollama pull qwen3:30b-a3b-instruct-2507-q4_K_M
+  # then in .shepitnoterc:
+  OLLAMA_MODEL=qwen3:30b-a3b-instruct-2507-q4_K_M
+  ```
+
+- Avoid **dense** models much above ~9B (e.g. `qwen3.6:27b`): quality is fine, but
+  they activate every parameter and run slowly on the APU.
+- Never use `*:cloud` models — they send the transcript off-machine, defeating the
+  local-only design.
+
+### Translate-first (opt-in)
+
+For non-English meetings you can translate the transcript to English **before**
+summarizing, on the theory that models summarize best in English:
+
+```bash
+SUMMARY_TRANSLATE=true ./shepitnote process meeting.wav     # env
+python3 summarize.py transcript.txt --translate             # worker flag
+# optional separate translate model:
+SUMMARY_TRANSLATE_MODEL=qwen3:30b-a3b-instruct-2507-q4_K_M
+```
+
+In testing on a Russian meeting this was **roughly a wash** with the multilingual
+MoE model above — and because the translation is faithful, it can carry
+transcription errors into English (`врачи` → "doctors", garbled numbers) rather
+than smoothing over them, which a direct multilingual summary sometimes does.
+Treat it as a per-meeting experiment, not a default. It runs two model passes
+(translate, then summarize), so expect roughly double the summarization time
+(~4 min with the MoE model on a ~13-minute meeting).

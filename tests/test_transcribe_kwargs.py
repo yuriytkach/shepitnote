@@ -86,6 +86,36 @@ class TestBuildTranscribeKwargs(unittest.TestCase):
         kw = transcribe._build_transcribe_kwargs(None, None, None, beam_size=1)
         self.assertEqual(kw, {"beam_size": 1})
 
+    def test_antihallucination_params_absent_by_default(self):
+        """None anti-hallucination args add no keys (reproduces historical call)."""
+        kw = transcribe._build_transcribe_kwargs("ru", None, None)
+        self.assertNotIn("vad_filter", kw)
+        self.assertNotIn("condition_on_previous_text", kw)
+        self.assertNotIn("hallucination_silence_threshold", kw)
+        self.assertNotIn("word_timestamps", kw)
+
+    def test_vad_and_condition_added_when_set(self):
+        """The live defaults (VAD on, conditioning off) are emitted as kwargs."""
+        kw = transcribe._build_transcribe_kwargs(
+            "ru", None, None, vad_filter=True, condition_on_previous_text=False
+        )
+        self.assertTrue(kw["vad_filter"])
+        self.assertFalse(kw["condition_on_previous_text"])
+
+    def test_vad_can_be_disabled(self):
+        """vad_filter=False is passed through as False (not dropped)."""
+        kw = transcribe._build_transcribe_kwargs(None, None, None, vad_filter=False)
+        self.assertIn("vad_filter", kw)
+        self.assertFalse(kw["vad_filter"])
+
+    def test_hallucination_threshold_enables_word_timestamps(self):
+        """A silence threshold implies word_timestamps=True (faster-whisper needs it)."""
+        kw = transcribe._build_transcribe_kwargs(
+            None, None, None, hallucination_silence_threshold=2.0
+        )
+        self.assertEqual(kw["hallucination_silence_threshold"], 2.0)
+        self.assertTrue(kw["word_timestamps"])
+
 
 if __name__ == "__main__":
     unittest.main()

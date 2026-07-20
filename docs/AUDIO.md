@@ -114,9 +114,14 @@ It is **opt-in and best-effort**:
   base dual-track flow never gains a hard dependency.
 - If only one far-side speaker is detected, the plain `[Remote]` label is kept
   (numbering appears only when 2+ are found).
-- Optional hints when you know the room: `DUAL_REMOTE_SPEAKERS=N` fixes the
-  far-side count, or `DUAL_REMOTE_MIN_SPEAKERS` / `DUAL_REMOTE_MAX_SPEAKERS`
-  bound it. Leave them unset to auto-detect.
+- Telling pyannote how many people are on the far side matters: auto-detect
+  **over-splits on compressed VoIP audio** (a real 6-person call was detected as
+  8, inflating the speaker list). The guided **`meeting`** flow now asks *"How
+  many people were on the call, not counting you?"* after recording and passes
+  your answer through — a blank answer falls back to auto-detect. For non-guided
+  runs, set it yourself: `DUAL_REMOTE_SPEAKERS=N` fixes the far-side count, or
+  `DUAL_REMOTE_MIN_SPEAKERS` / `DUAL_REMOTE_MAX_SPEAKERS` bound it. When set in the
+  environment, the prompt is skipped.
 
 The split adds a diarization pass over the system track, so processing a dual
 meeting takes longer with it on. Speaker labels are still `[Remote N]`, not real
