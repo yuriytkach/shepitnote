@@ -2,7 +2,7 @@
 
 **Private, local, multilingual meeting notes for Linux — record, transcribe, label who said what, summarize, and publish, all on your own machine.**
 
-ShepitNote records a meeting, transcribes it with faster-whisper, labels who said what, and summarizes it with a local LLM (Ollama) — then, at your choice, publishes the full notes to Confluence and a short TL;DR to Slack. Everything runs locally: no cloud services, nothing leaves your machine. The name is from Ukrainian *шепіт* ("whisper") — a nod to the quiet, local ethos and to the Whisper model under the hood.
+ShepitNote records a meeting, transcribes it with faster-whisper, labels who said what, and summarizes it with a local LLM (Ollama) — then, at your choice, publishes the full notes to Confluence and a short TL;DR to Slack. Everything runs locally by default — no cloud services, nothing leaves your machine — with an optional, opt-in [cloud mode](docs/CLOUD.md) for when you'd rather trade privacy for speed and a stronger model on a non-sensitive meeting. The name is from Ukrainian *шепіт* ("whisper") — a nod to the quiet, local ethos and to the Whisper model under the hood.
 
 It's built for meetings that mix **Ukrainian, Russian, and English** (with English tech terms), adding dual-track *You/Remote* capture, real-time echo cancellation for open-speaker calls, per-meeting language selection, tech-term accuracy tuning, and a guided review-then-confirm publishing flow on top of the original pipeline.
 
@@ -27,7 +27,7 @@ Upstream **[hushnote](https://github.com/peteonrails/hushnote)** is an excellent
 | **Open-speaker calls** | mic records the remote echo | **real-time WebRTC echo cancellation** (`aec on`/`off`) |
 | **Publishing** | one generic post-summary hook | first-class **Confluence** + **Slack** publishers, and a dispatcher |
 | **Control** | the hook fires automatically | a guided **review → per-target confirm** flow |
-| **Privacy** | 100% local | 100% local (unchanged) |
+| **Privacy** | 100% local | 100% local by default; **opt-in cloud mode** when you want it |
 
 Rule of thumb: if your meetings are English-only and you just want a local transcript + summary, upstream hushnote is a great fit. If they mix Ukrainian/Russian with English tech vocabulary and you publish notes to Confluence and Slack, that's exactly what ShepitNote is tuned for.
 
@@ -42,7 +42,8 @@ Rule of thumb: if your meetings are English-only and you just want a local trans
 - **🤖 Local summarization** — structured notes via Ollama: summary, discussion, decisions, action items
 - **📤 Publishing** — Confluence (full notes) + Slack (TL;DR), automatic or confirm-gated
 - **📋 Status & catchup** — see what's pending / partial / done; reprocess anything missed
-- **🔒 100% private** — all processing is local; no internet required after setup
+- **☁️ Optional cloud mode** — opt in per run (`--cloud`) to offload summaries to Ollama Cloud and transcription to a cloud Whisper API (Groq by default) for speed and a stronger model; off by default
+- **🔒 Private by default** — all processing is local, no internet required after setup; cloud mode is the only exception, and only when you turn it on
 
 ## Quick start
 
@@ -75,7 +76,7 @@ Copy the annotated example and edit to taste:
 cp .shepitnoterc.example .shepitnoterc
 ```
 
-`.shepitnoterc` is sourced at startup and git-ignored. It documents every option — audio backend, Whisper model/language, Ollama model, tech-term hotwords/glossary, silent-tail thresholds, CPU limits (`CPU_THREADS` / `PROCESSING_NICE`, so processing doesn't hog the machine — see [Troubleshooting](#troubleshooting)), the post-summary hook, and the Confluence/Slack blocks.
+`.shepitnoterc` is sourced at startup and git-ignored. It documents every option — audio backend, Whisper model/language, Ollama model, the opt-in cloud-mode block, tech-term hotwords/glossary, silent-tail thresholds, CPU limits (`CPU_THREADS` / `PROCESSING_NICE`, so processing doesn't hog the machine — see [Troubleshooting](#troubleshooting)), the post-summary hook, and the Confluence/Slack blocks.
 
 ## Usage
 
@@ -105,10 +106,14 @@ Options:
     --initial-prompt TEXT   Decoding-bias sentence for tech-term spelling (overrides --hotwords)
     --hotwords TERMS        Space-separated tech terms to bias transcription spelling
     -o, --ollama MODEL      Ollama model for summarization
+    --cloud                 Process this run in the cloud: summaries via Ollama
+                            Cloud, transcription via a cloud Whisper API (Groq).
+                            Off by default; --no-cloud forces local (docs/CLOUD.md)
     -f, --format FMT        Output format (txt|json|srt|vtt|md)
     -s, --speakers NUM      Number of speakers (for diarization)
     -t, --title TITLE       Meeting title (prompted if not provided)
     --diarize               Enable speaker diarization in full workflow
+    --no-diarize            Skip speaker diarization for this run
     --no-trim               Skip silent tail trimming
     --keep-untrimmed        Keep full MP3 alongside trimmed version (default: delete)
     --keep-trimmed          Keep trimmed MP3 after transcription (default: keep)
@@ -149,6 +154,9 @@ Point `POST_SUMMARY_HOOK` at the bundled publishers for automatic publishing, or
 ### Speaker diarization
 Optional "who spoke when" with interactive labeling, for multi-person recordings captured on a single track. → **[docs/DIARIZATION.md](docs/DIARIZATION.md)**
 
+### Cloud mode (optional)
+Fully local by default. When a meeting isn't sensitive and you'd rather trade privacy for speed and a stronger model, opt in per run with `./shepitnote --cloud …`: summaries run on an Ollama Cloud model and transcription on a cloud Whisper API (Groq by default, or any OpenAI-compatible host). It's off unless you turn it on, prints a clear warning of what will be uploaded, and — in the guided `meeting` flow — confirms before anything leaves the machine; audio stays local unless you also set a transcription key (`--no-cloud` forces local for a run). → **[docs/CLOUD.md](docs/CLOUD.md)**
+
 ## Pipeline
 
 ```
@@ -160,7 +168,7 @@ record → WAV
        → run POST_SUMMARY_HOOK (if set)
 ```
 
-In `dual` mode, trimming is skipped and the two tracks are transcribed and interleaved by timestamp. See [docs/AUDIO.md](docs/AUDIO.md#output-files) for the file layout of each mode.
+In `dual` mode, trimming is skipped and the two tracks are transcribed and interleaved by timestamp. See [docs/AUDIO.md](docs/AUDIO.md#output-files) for the file layout of each mode. With `--cloud`, the transcribe and summarize steps run on cloud services instead of locally; every other step is unchanged — see [docs/CLOUD.md](docs/CLOUD.md).
 
 ## Troubleshooting
 
@@ -188,6 +196,7 @@ More fixes live in [docs/SETUP.md](docs/SETUP.md#troubleshooting) and each topic
 - **[docs/LANGUAGE.md](docs/LANGUAGE.md)** — Whisper models, uk/ru/en selection, tech-term accuracy
 - **[docs/PUBLISHING.md](docs/PUBLISHING.md)** — post-summary hook, Confluence, Slack, the guided flow
 - **[docs/DIARIZATION.md](docs/DIARIZATION.md)** — speaker diarization guide
+- **[docs/CLOUD.md](docs/CLOUD.md)** — optional cloud mode: summaries + transcription, providers, cost, privacy
 - **[CONTRIBUTING.md](CONTRIBUTING.md)** — development setup and guidelines
 
 ## License
