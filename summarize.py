@@ -235,6 +235,12 @@ def main():
     translate = args.translate if args.translate is not None else _env_bool("SUMMARY_TRANSLATE")
     translate_model = args.translate_model or os.getenv("SUMMARY_TRANSLATE_MODEL") or args.model
 
+    # Heads-up when a cloud model is in play: the transcript leaves the machine.
+    # shepitnote prints a fuller cloud banner, but this covers direct calls too.
+    if ":cloud" in (args.model or "").lower() or ":cloud" in (translate_model or "").lower():
+        print(f"Note: '{args.model}' is a cloud model — the transcript is sent "
+              "to Ollama Cloud for summarization.", file=sys.stderr)
+
     # Load transcription
     transcription = load_transcription(args.transcription_file)
 

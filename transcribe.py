@@ -384,21 +384,54 @@ def main():
             except ValueError:
                 hallucination_silence_threshold = None
 
-    # Transcribe
+    # Cloud transcription (opt-in): when CLOUD_TRANSCRIBE is on AND a key is
+    # configured, route to an OpenAI-compatible provider (Groq by default)
+    # instead of local faster-whisper. Both env vars are exported by shepitnote
+    # when cloud mode is enabled. Any failure — or a missing key — falls back to
+    # local Whisper, so a meeting is never lost to a transient cloud hiccup.
+    result = None
+    if _env_bool("CLOUD_TRANSCRIBE", False):
+        api_key = (os.getenv("CLOUD_TRANSCRIBE_API_KEY") or "").strip()
+        if api_key:
+            try:
+                import cloud_transcribe
+                print("Cloud transcription enabled — uploading audio to the "
+                      "configured provider.", file=sys.stderr)
+                result = cloud_transcribe.transcribe_via_api(
+                    args.audio_file,
+                    language=args.language,
+                    base_url=os.getenv("CLOUD_TRANSCRIBE_BASE_URL",
+                                       cloud_transcribe.DEFAULT_BASE_URL),
+                    api_key=api_key,
+                    model=os.getenv("CLOUD_TRANSCRIBE_MODEL",
+                                    cloud_transcribe.DEFAULT_MODEL),
+                    prompt=args.initial_prompt or args.hotwords or None,
+                )
+            except Exception as e:
+                print(f"Cloud transcription failed ({e}); falling back to "
+                      "local Whisper.", file=sys.stderr)
+                result = None
+        else:
+            print("Cloud transcription requested but no CLOUD_TRANSCRIBE_API_KEY "
+                  "/ GROQ_API_KEY is set — using local Whisper.", file=sys.stderr)
+
+    # Transcribe (local faster-whisper) unless the cloud path already produced a
+    # result above.
     try:
-        result = transcribe_audio(
-            args.audio_file,
-            model_size=args.model,
-            device=args.device,
-            language=args.language,
-            output_format=args.format,
-            initial_prompt=args.initial_prompt,
-            hotwords=args.hotwords,
-            cpu_threads=cpu_threads,
-            vad_filter=vad_filter,
-            condition_on_previous_text=condition_on_previous_text,
-            hallucination_silence_threshold=hallucination_silence_threshold
-        )
+        if result is None:
+            result = transcribe_audio(
+                args.audio_file,
+                model_size=args.model,
+                device=args.device,
+                language=args.language,
+                output_format=args.format,
+                initial_prompt=args.initial_prompt,
+                hotwords=args.hotwords,
+                cpu_threads=cpu_threads,
+                vad_filter=vad_filter,
+                condition_on_previous_text=condition_on_previous_text,
+                hallucination_silence_threshold=hallucination_silence_threshold
+            )
 
         # Save results
         save_transcription(result, output_file, args.format)

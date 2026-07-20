@@ -24,6 +24,75 @@ WHISPER_INITIAL_PROMPT="${WHISPER_INITIAL_PROMPT:-}" # Sentence-form decoding bi
 GLOSSARY_DIR="${GLOSSARY_DIR:-${SCRIPT_DIR}}"        # Directory of per-language glossary.<lang>.txt term files
 OLLAMA_MODEL="${OLLAMA_MODEL:-llama3.1:8b}"
 OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434}"
+
+# --- Cloud mode (opt-in; OFF by default) -------------------------------------
+# Everything runs locally unless cloud mode is turned on with `--cloud` (per run)
+# or CLOUD=true in .shepitnoterc. When on:
+#   * summaries use CLOUD_SUMMARY_MODEL via Ollama Cloud (needs `ollama signin`);
+#   * transcription uses a cloud Whisper API (default preset: Groq) IF a key is
+#     set — otherwise it transparently falls back to local Whisper.
+# Both providers expose OpenAI-compatible APIs, so any Whisper host works by
+# editing the CLOUD_TRANSCRIBE_* preset. Cloud sends your transcript (and, for
+# cloud transcription, your audio) off this machine — see docs/CLOUD.md.
+CLOUD="${CLOUD:-false}"
+LOCAL_SUMMARY_MODEL="$OLLAMA_MODEL"                       # remembered so --no-cloud can restore it
+CLOUD_SUMMARY_MODEL="${CLOUD_SUMMARY_MODEL:-gpt-oss:120b-cloud}"
+CLOUD_TRANSCRIBE_BASE_URL="${CLOUD_TRANSCRIBE_BASE_URL:-https://api.groq.com/openai/v1}"
+CLOUD_TRANSCRIBE_MODEL="${CLOUD_TRANSCRIBE_MODEL:-whisper-large-v3}"
+# Accept GROQ_API_KEY as a convenience alias for the generic key variable.
+CLOUD_TRANSCRIBE_API_KEY="${CLOUD_TRANSCRIBE_API_KEY:-${GROQ_API_KEY:-}}"
+# Whether cloud transcription follows the master switch. Empty = follow CLOUD;
+# an explicit true/false in the environment always wins (e.g. cloud summary but
+# local transcription).
+CLOUD_TRANSCRIBE_EXPLICIT="${CLOUD_TRANSCRIBE:-}"
+
+_is_true() {
+    case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
+        1|true|yes|on) return 0 ;;
+        *) return 1 ;;
+    esac
+}
+
+cloud_resolve() {
+    # (Re)apply cloud settings from the current CLOUD value. Idempotent, so it
+    # runs once at startup and again if --cloud/--no-cloud flips CLOUD. Every
+    # value is exported so re-invoked children ("$0" process ...) and the Python
+    # workers inherit the same decision.
+    if _is_true "$CLOUD"; then
+        if [ -n "$CLOUD_TRANSCRIBE_EXPLICIT" ]; then
+            CLOUD_TRANSCRIBE="$CLOUD_TRANSCRIBE_EXPLICIT"
+        else
+            CLOUD_TRANSCRIBE="true"
+        fi
+        OLLAMA_MODEL="$CLOUD_SUMMARY_MODEL"
+    else
+        CLOUD_TRANSCRIBE="false"
+        OLLAMA_MODEL="$LOCAL_SUMMARY_MODEL"
+    fi
+    export CLOUD CLOUD_TRANSCRIBE CLOUD_TRANSCRIBE_BASE_URL CLOUD_TRANSCRIBE_MODEL \
+           CLOUD_TRANSCRIBE_API_KEY OLLAMA_MODEL
+}
+cloud_resolve
+
+cloud_banner() {
+    # One-time warning that data will leave the machine in cloud mode. The guard
+    # is exported so a re-invoked child ("$0" process ...) does not repeat it.
+    _is_true "$CLOUD" || return 0
+    [ -n "${SHEPITNOTE_CLOUD_BANNER_SHOWN:-}" ] && return 0
+    export SHEPITNOTE_CLOUD_BANNER_SHOWN=1
+    log_warn "CLOUD MODE ON — data will leave this machine:"
+    log_warn "  * Summary    -> Ollama Cloud model '${CLOUD_SUMMARY_MODEL}' (transcript uploaded)"
+    if _is_true "$CLOUD_TRANSCRIBE"; then
+        if [ -n "$CLOUD_TRANSCRIBE_API_KEY" ]; then
+            log_warn "  * Transcribe -> ${CLOUD_TRANSCRIBE_MODEL} at ${CLOUD_TRANSCRIBE_BASE_URL} (audio uploaded)"
+        else
+            log_warn "  * Transcribe -> LOCAL Whisper (no CLOUD_TRANSCRIBE_API_KEY / GROQ_API_KEY set)"
+        fi
+    else
+        log_warn "  * Transcribe -> LOCAL Whisper (cloud transcription disabled)"
+    fi
+}
+
 PROCESS_TIMEOUT="${PROCESS_TIMEOUT:-7200}"  # Max seconds for process/process-last (default: 2h)
 TRIM_NOISE_DB="${TRIM_NOISE_DB:--35}"       # dB threshold for silence detection (default: -35)
 TRIM_MIN_SILENCE="${TRIM_MIN_SILENCE:-60}"  # Minimum silence duration in seconds (default: 60)
@@ -106,6 +175,9 @@ Options:
     --initial-prompt T  Decoding-bias sentence for tech-term spelling (overrides --hotwords)
     --hotwords TERMS    Space-separated tech terms to bias transcription spelling
     -o, --ollama MODEL  Ollama model for summarization (default: llama3.1:8b)
+    --cloud             Process this run in the cloud: summaries via Ollama Cloud,
+                        transcription via a cloud Whisper API (Groq by default).
+                        Off by default; --no-cloud forces local. See docs/CLOUD.md.
     -f, --format FMT    Output format: txt, json, srt, vtt, md (default: txt for transcribe, md for summarize)
     -s, --speakers NUM  Number of speakers (for diarization)
     -t, --title TITLE   Meeting title (prompted if not provided)
@@ -139,6 +211,17 @@ Environment Variables:
                         to the transcript before summarizing (default: script dir)
     OLLAMA_MODEL        Default Ollama model (default: llama3.1:8b)
     OLLAMA_URL          Ollama API URL (default: http://localhost:11434)
+    CLOUD               Set true to process in the cloud (same as --cloud); off by
+                        default. Summaries use CLOUD_SUMMARY_MODEL; transcription
+                        uses a cloud Whisper API when a key is set.
+    CLOUD_SUMMARY_MODEL Ollama Cloud model for summaries in cloud mode
+                        (default: gpt-oss:120b-cloud, on Ollama's free tier)
+    CLOUD_TRANSCRIBE_API_KEY  API key for cloud transcription (GROQ_API_KEY is
+                        accepted too); if unset, transcription stays local even in
+                        cloud mode
+    CLOUD_TRANSCRIBE_BASE_URL / CLOUD_TRANSCRIBE_MODEL  OpenAI-compatible endpoint
+                        and model for cloud transcription (default: Groq,
+                        whisper-large-v3)
     CPU_THREADS         Cap worker threads (whisper/pyannote/Ollama) so cores stay
                         free during processing (default: half the logical CPUs; 0 = uncapped)
     PROCESSING_NICE     Scheduling niceness 0..19 for the CPU-heavy workers so the
@@ -2126,6 +2209,7 @@ meeting_ui() {
                 echo "  -m, --model MODEL     Whisper model (tiny|base|small|medium|large-v3)"
                 echo "  -l, --language LANG   Language code (uk|ru|en|auto, default: auto-detect)"
                 echo "  -o, --ollama MODEL    Ollama model for summarization (default: ${OLLAMA_MODEL})"
+                echo "  --cloud               Summarize/transcribe via the cloud this run (off by default)"
                 echo "  --initial-prompt TEXT Decoding-bias sentence (overrides --hotwords)"
                 echo "  --hotwords TERMS      Space-separated tech terms to bias transcription"
                 echo "  --diarize             Enable speaker diarization"
@@ -2145,6 +2229,23 @@ meeting_ui() {
     # Fail fast if the transcription environment is missing, BEFORE recording, so
     # we never capture a full meeting only to die at the transcribe step.
     check_python_env
+
+    # Cloud confirm: make the off-machine upload explicit before we record.
+    # Declining falls back to fully local processing for this run. A blank/EOF
+    # answer (SSH/pipe) keeps cloud on, since the user opted in explicitly.
+    if _is_true "$CLOUD"; then
+        cloud_banner
+        local _cloud_ans
+        _cloud_ans=$(_ui_prompt "Continue in cloud mode (data leaves this machine)? [Y/n]: ")
+        case "$(printf '%s' "$_cloud_ans" | tr '[:upper:]' '[:lower:]')" in
+            n|no)
+                CLOUD="false"
+                cloud_resolve
+                log_info "Cloud mode disabled for this run — processing locally."
+                ;;
+        esac
+        echo ""
+    fi
 
     # Step 1: Record (reuses record_meeting; Ctrl+C or -d stops recording).
     log_info "Step 1/4: Recording (press Ctrl+C to stop)..."
@@ -2373,6 +2474,24 @@ meeting_ui() {
 
 # Main command dispatcher
 main() {
+    # Global --cloud / --no-cloud flag: opt in/out of cloud processing for this
+    # run. Off by default. Strip it wherever it appears (before or after the
+    # command) so per-command parsers never see it, then re-resolve the cloud
+    # settings with the new value.
+    local _args=() _a _cloud_flag=""
+    for _a in "$@"; do
+        case "$_a" in
+            --cloud)    _cloud_flag="true" ;;
+            --no-cloud) _cloud_flag="false" ;;
+            *)          _args+=("$_a") ;;
+        esac
+    done
+    if [ ${#_args[@]} -gt 0 ]; then set -- "${_args[@]}"; else set --; fi
+    if [ -n "$_cloud_flag" ]; then
+        CLOUD="$_cloud_flag"
+        cloud_resolve
+    fi
+
     if [ $# -eq 0 ]; then
         print_usage
         exit 0
@@ -2389,6 +2508,14 @@ main() {
     case "$command" in
         transcribe|process|process-last)
             check_python_env
+            ;;
+    esac
+
+    # Warn once, up front, when cloud mode will send data off the machine. The
+    # guided `meeting` flow prints its own banner + confirm inside meeting_ui.
+    case "$command" in
+        transcribe|process|process-last|full|catchup)
+            cloud_banner
             ;;
     esac
 
