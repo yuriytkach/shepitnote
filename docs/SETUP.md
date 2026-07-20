@@ -101,6 +101,32 @@ For best results:
 ./shepitnote full -m medium -o mixtral:8x7b
 ```
 
+## Keeping the desktop responsive (CPU limits)
+
+Post-meeting processing — faster-whisper transcription, pyannote diarization, and
+Ollama summarization — is CPU-heavy on a machine without a usable GPU. Left
+unbounded it can grab every core and make the system feel frozen. Two settings in
+`.shepitnoterc` keep it in check (both applied automatically):
+
+| Setting | Default | Effect |
+|---------|---------|--------|
+| `CPU_THREADS` | half the logical CPUs | Caps the worker thread pools (faster-whisper, pyannote, Ollama) so cores stay free for other apps. `0` = uncapped. |
+| `PROCESSING_NICE` | `10` | Runs the CPU-heavy workers under `nice`, so interactive apps (browser, editor) always preempt them. `0` = disabled. |
+
+The defaults favour a responsive desktop over raw speed — processing just takes a
+bit longer. Recording itself is never throttled.
+
+```bash
+# Gentler: leave lots of cores free and run at lowest priority
+CPU_THREADS=8 PROCESSING_NICE=19 ./shepitnote full
+
+# Faster: use all cores at normal priority (e.g. when you're away from the machine)
+CPU_THREADS=0 PROCESSING_NICE=0 ./shepitnote full
+```
+
+If memory (not CPU) is the pinch — `large-v3` + pyannote + a large Ollama model all
+resident — set `UNLOAD_OLLAMA=1` to free the LLM before transcription.
+
 ## Language & accuracy (uk/ru/en)
 
 `large-v3` is the default Whisper model — best multilingual accuracy, but slower

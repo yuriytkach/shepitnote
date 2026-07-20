@@ -75,7 +75,7 @@ Copy the annotated example and edit to taste:
 cp .shepitnoterc.example .shepitnoterc
 ```
 
-`.shepitnoterc` is sourced at startup and git-ignored. It documents every option — audio backend, Whisper model/language, Ollama model, tech-term hotwords/glossary, silent-tail thresholds, the post-summary hook, and the Confluence/Slack blocks.
+`.shepitnoterc` is sourced at startup and git-ignored. It documents every option — audio backend, Whisper model/language, Ollama model, tech-term hotwords/glossary, silent-tail thresholds, CPU limits (`CPU_THREADS` / `PROCESSING_NICE`, so processing doesn't hog the machine — see [Troubleshooting](#troubleshooting)), the post-summary hook, and the Confluence/Slack blocks.
 
 ## Usage
 
@@ -168,6 +168,8 @@ pactl set-default-source YOUR_SOURCE_NAME
 **The You track is a duplicate of Remote** — you're on open speakers and the mic is recording the remote audio. Run `./shepitnote aec on` before the call. See [docs/AUDIO.md](docs/AUDIO.md#echo-cancellation-open-speaker-meetings).
 
 **Ollama not responding** — `systemctl status ollama`, `ollama list`, and pass a model you have with `-o`.
+
+**System sluggish while a meeting processes** — transcription, diarization, and summarization run on the CPU. By default they're capped to half your cores (`CPU_THREADS`) and run at low priority (`PROCESSING_NICE`) so the desktop stays responsive; lower `CPU_THREADS` / raise `PROCESSING_NICE` to free up more. See [docs/SETUP.md](docs/SETUP.md#keeping-the-desktop-responsive-cpu-limits).
 
 More fixes live in [docs/SETUP.md](docs/SETUP.md#troubleshooting) and each topic guide below.
 
