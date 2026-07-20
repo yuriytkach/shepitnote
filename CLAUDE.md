@@ -11,8 +11,8 @@ User-facing overview lives in `README.md`; this file is the map for working *on*
 single-purpose **Python workers** running in `./venv`. Contract for every worker:
 **data → stdout, logs/errors → stderr**, so bash captures a result with `$(...)` while the
 user still sees progress. Nothing else talks to the network or the mic — the workers do.
-`setup.sh` builds `venv/`; workers are invoked as `"$PYTHON" worker.py …` where
-`PYTHON=venv/bin/python3`.
+`setup.sh` builds `venv/` (deps declared in `pyproject.toml`, extras `diarize`/`gpu`; there is no
+`requirements.txt`); workers are invoked as `"$PYTHON" worker.py …` where `PYTHON=venv/bin/python3`.
 
 ## File map
 
@@ -90,8 +90,6 @@ on the AMD iGPU** (unified ~61 GB RAM) — don't run heavy Whisper + Ollama at o
 is CPU pyannote 4.x — install with `./setup.sh --diarize` (CPU torch wheels **on purpose**; the CUDA
 `torchcodec` build breaks it). Optional cloud mode (`--cloud`): Ollama Cloud summaries
 (`gpt-oss:120b-cloud`, free tier) + Groq Whisper — sends data off-machine (see `docs/CLOUD.md`).
-Note: `CONTRIBUTING.md` is partly inherited from upstream (mentions a `requirements.txt` that
-doesn't exist) — trust `setup.sh` / `pyproject.toml` for the real setup.
 
 ## Docs index (deep dives)
 
