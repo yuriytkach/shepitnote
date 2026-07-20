@@ -2841,17 +2841,24 @@ main() {
             ) &
             local _proc_pid=$!
 
-            # Watchdog: sleep in background, then kill the processing subshell
+            # Watchdog: sleep in the background, then kill the processing subshell
+            # if it is still alive after the timeout. Its stdout/stderr go to
+            # /dev/null on purpose: in the guided `meeting` flow the whole `process`
+            # run is piped to `tee`, so this subshell (and the `sleep` it spawns)
+            # would otherwise inherit that pipe's write-end. After a NORMAL run the
+            # watchdog is still mid-sleep when we kill it; a `sleep` orphaned that
+            # way would keep the pipe open and hang the guided flow forever even
+            # though processing succeeded. Sending its fds to /dev/null makes that
+            # impossible. The timeout itself is reported by the parent below (the
+            # 143/137 exit check), so nothing is lost by muting the watchdog.
             (
                 sleep "$process_timeout"
                 if kill -0 "$_proc_pid" 2>/dev/null; then
-                    echo "" >&2
-                    echo -e "${RED}[ERROR]${NC} Processing timed out after ${timeout_human}. Stopping..." >&2
                     kill -TERM "$_proc_pid" 2>/dev/null
                     sleep 30
                     kill -KILL "$_proc_pid" 2>/dev/null
                 fi
-            ) &
+            ) >/dev/null 2>&1 &
             local _watchdog_pid=$!
 
             # Capture the processing exit status without tripping `set -e`: a
@@ -2861,10 +2868,15 @@ main() {
             local _exit=0
             wait "$_proc_pid" || _exit=$?
 
-            # Cancel the watchdog if processing finished in time. These are
-            # guarded with `|| true` because after a normal run the watchdog is
-            # still sleeping, so killing it makes `wait` return 143 — which under
-            # `set -e` would abort the command on every SUCCESSFUL run.
+            # Stop the watchdog now that processing is done. Kill its `sleep` child
+            # FIRST, while the parent link is still intact, so no orphaned sleep is
+            # left lingering for the rest of the (up to 2h) timeout window; then the
+            # subshell itself. All guarded with `|| true` because after a normal run
+            # the watchdog is still sleeping, so killing it makes `wait` return a
+            # signal code (143) — which under `set -e` would abort every SUCCESSFUL
+            # run. The /dev/null redirect above is the real anti-hang guarantee;
+            # this is prompt cleanup on top of it.
+            pkill -P "$_watchdog_pid" 2>/dev/null || true
             kill "$_watchdog_pid" 2>/dev/null || true
             wait "$_watchdog_pid" 2>/dev/null || true
 
