@@ -7,6 +7,7 @@ Identifies who spoke when in an audio file
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 from datetime import datetime, timezone
@@ -17,6 +18,15 @@ except ImportError:
     print("Error: pyannote.audio not installed", file=sys.stderr)
     print("Install with: pip install pyannote.audio", file=sys.stderr)
     sys.exit(1)
+
+# pyannote.audio 4.x ships the open diarization pipeline as
+# speaker-diarization-community-1 (the older speaker-diarization-3.1 now resolves
+# to it under 4.x). Overridable via PYANNOTE_PIPELINE for anyone with access to a
+# different/newer pipeline. Whichever is used must have its conditions accepted on
+# Hugging Face with the account behind HF_TOKEN.
+DEFAULT_PIPELINE = os.environ.get(
+    "PYANNOTE_PIPELINE", "pyannote/speaker-diarization-community-1"
+)
 
 
 def diarize_audio(
@@ -42,15 +52,12 @@ def diarize_audio(
     print(f"Loading diarization model...", file=sys.stderr)
 
     try:
-        pipeline = Pipeline.from_pretrained(
-            "pyannote/speaker-diarization-3.1",
-            token=hf_token
-        )
+        pipeline = Pipeline.from_pretrained(DEFAULT_PIPELINE, token=hf_token)
     except Exception as e:
         print(f"\nError loading model: {e}", file=sys.stderr)
         print("\nYou may need to:", file=sys.stderr)
         print("1. Create a HuggingFace account at https://huggingface.co/join", file=sys.stderr)
-        print("2. Accept pyannote conditions at https://huggingface.co/pyannote/speaker-diarization-3.1", file=sys.stderr)
+        print(f"2. Accept the model conditions at https://huggingface.co/{DEFAULT_PIPELINE}", file=sys.stderr)
         print("3. Create an access token at https://huggingface.co/settings/tokens", file=sys.stderr)
         print("4. Set HF_TOKEN environment variable or use --hf-token flag", file=sys.stderr)
         sys.exit(1)
@@ -73,8 +80,10 @@ def diarize_audio(
     segments = []
     speaker_stats = {}
 
-    # DiarizeOutput has speaker_diarization attribute (Annotation object)
-    diarization = diarization_output.speaker_diarization
+    # pyannote 4.x community pipelines return a structured output whose
+    # .speaker_diarization is the Annotation; older pipelines return the
+    # Annotation directly. Support both so the code isn't pinned to one version.
+    diarization = getattr(diarization_output, "speaker_diarization", diarization_output)
 
     # Iterate over diarization results
     for turn, track, speaker in diarization.itertracks(yield_label=True):
@@ -103,7 +112,7 @@ def diarize_audio(
         "audio_file": str(Path(audio_file).name),
         "audio_path": str(Path(audio_file).absolute()),
         "duration": duration,
-        "diarization_model": "pyannote/speaker-diarization-3.1",
+        "diarization_model": DEFAULT_PIPELINE,
         "num_speakers": len(speaker_stats),
         "created_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
         "segments": segments,
@@ -153,7 +162,6 @@ def main():
         sys.exit(1)
 
     # Get HuggingFace token
-    import os
     hf_token = args.hf_token or os.getenv("HF_TOKEN")
 
     if not hf_token:

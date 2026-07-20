@@ -80,7 +80,7 @@ Speaker diarization adds speaker labels to transcriptions, making it easy to see
 Pyannote models require a free HuggingFace account:
 
 1. **Create account**: https://huggingface.co/join
-2. **Accept conditions**: https://huggingface.co/pyannote/speaker-diarization-3.1
+2. **Accept conditions**: https://huggingface.co/pyannote/speaker-diarization-community-1
 3. **Create token**: https://huggingface.co/settings/tokens
 4. **Set environment variable**:
 
@@ -391,7 +391,7 @@ The JSON format includes fields for API integration:
 
 **Solution:**
 1. Get a free HuggingFace account: https://huggingface.co/join
-2. Accept pyannote conditions: https://huggingface.co/pyannote/speaker-diarization-3.1
+2. Accept pyannote conditions: https://huggingface.co/pyannote/speaker-diarization-community-1
 3. Create access token: https://huggingface.co/settings/tokens
 4. Set environment variable: `export HF_TOKEN="your_token"`
 
@@ -466,9 +466,9 @@ The HuggingFace token is only used to download models once. After that, everythi
 
 ### Models Used
 
-- **Diarization**: `pyannote/speaker-diarization-3.1`
-  - Size: ~50-200MB
-  - Accuracy: ~10% DER (Diarization Error Rate)
+- **Diarization**: `pyannote/speaker-diarization-community-1` (pyannote.audio 4.x;
+  override with `PYANNOTE_PIPELINE`)
+  - Size: ~40MB (community-1 + segmentation-3.0), cached after first download
   - License: MIT
 
 - **Transcription**: `faster-whisper` (OpenAI Whisper)

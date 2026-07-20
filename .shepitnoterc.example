@@ -230,7 +230,9 @@
 # Will be called as: $NOTIFY_CMD "summary" "body"
 #NOTIFY_CMD=notify-send
 
-# HuggingFace API token — required for speaker diarization (pyannote models).
+# HuggingFace API token — required for speaker diarization (pyannote models),
+# including DUAL_REMOTE_DIARIZATION above.
 # Create a token at https://huggingface.co/settings/tokens
-# Accept model conditions at https://huggingface.co/pyannote/speaker-diarization-3.1
+# Accept model conditions at https://huggingface.co/pyannote/speaker-diarization-community-1
+# (pyannote.audio 4.x; the model is downloaded and cached locally on first use).
 #HF_TOKEN=hf_...
