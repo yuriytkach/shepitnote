@@ -18,15 +18,15 @@ Before creating bug reports, please check existing issues to avoid duplicates. W
 - **Clear title and description**
 - **Steps to reproduce** the issue
 - **Expected behavior** vs actual behavior
-- **Environment details**: OS, Python version, GPU (if applicable)
-- **Logs or error messages** (use DEBUG=true for detailed output)
+- **Environment details**: OS/distro, Python version, audio backend (PipeWire/PulseAudio), GPU (if any)
+- **Logs or error messages** (run with `DEBUG=true` for detailed output)
 
 ### Suggesting Enhancements
 
 Enhancement suggestions are welcome! Please:
 
 - Use a clear and descriptive title
-- Provide detailed description of the proposed feature
+- Provide a detailed description of the proposed feature
 - Explain why this enhancement would be useful
 - Include examples of how it would work
 
@@ -35,143 +35,153 @@ Enhancement suggestions are welcome! Please:
 1. Fork the repository
 2. Create a feature branch (`git checkout -b feature/amazing-feature`)
 3. Make your changes
-4. Test thoroughly
-5. Commit with clear messages (`git commit -m 'Add amazing feature'`)
+4. Test thoroughly (see [Testing](#testing))
+5. Commit with a clear message (`git commit -m 'feat: add amazing feature'` — see [Commit Messages](#commit-messages))
 6. Push to your fork (`git push origin feature/amazing-feature`)
 7. Open a Pull Request
 
 ## Development Setup
+
+ShepitNote is a bash orchestrator (`shepitnote`) that shells out to small Python workers running
+in a local virtualenv (`venv/`). See [CLAUDE.md](CLAUDE.md) for the architecture and a file-by-file
+map, and [docs/SETUP.md](docs/SETUP.md) for the full install guide.
 
 ```bash
 # Clone your fork
 git clone https://github.com/YOUR_USERNAME/shepitnote.git
 cd shepitnote
 
-# Create virtual environment
-python -m venv venv
-source venv/bin/activate  # or `./venv/bin/activate` on some systems
+# System dependencies (names vary by distro)
+sudo apt install ffmpeg pipewire-pulse python3-venv      # Debian / Ubuntu / KDE neon
+# Arch / CachyOS:  yay -S ffmpeg pipewire-pulse python
 
-# Install dependencies
-pip install -r requirements.txt
+# Create venv/ and install the worker dependencies (faster-whisper,
+# huggingface-hub, requests). Idempotent — safe to re-run.
+./setup.sh
+# Optional: pre-download a Whisper model, and install the CPU diarization stack
+./setup.sh --model small --diarize
 
-# Install development dependencies (if any)
-pip install -r requirements-dev.txt  # when available
-
-# Make scripts executable
-chmod +x shepitnote record_audio.sh transcribe.py summarize.py
+# A local summarization model in Ollama (any instruction-tuned model)
+curl -fsSL https://ollama.com/install.sh | sh
+ollama pull llama3.1:8b
 ```
+
+Python dependencies are declared in `pyproject.toml` (optional extras: `diarize`, `gpu`) and
+installed by `./setup.sh`; there is **no** `requirements.txt`. The scripts are already executable
+in the repo, so no `chmod` step is needed. Local config lives in `.shepitnoterc` (git-ignored);
+copy the annotated template to start: `cp .shepitnoterc.example .shepitnoterc`.
 
 ## Testing
 
-Before submitting a PR, test your changes:
-
 ```bash
-# Test basic recording (2 seconds)
-./shepitnote record -d 2
+# Unit tests — pure logic only (no mic, Ollama, or network); fast.
+venv/bin/python -m unittest discover -s tests
 
-# Test transcription
-./shepitnote transcribe recordings/meeting_*.wav -m tiny
-
-# Test summarization
-./shepitnote summarize recordings/meeting_*.txt -o llama3.2:1b
-
-# Test full workflow
+# Smoke-test the real pipeline end to end with tiny models (needs a mic + Ollama)
 ./shepitnote full -d 5 -m tiny -o llama3.2:1b
 
-# Enable debug mode for detailed output
+# Exercise individual steps
+./shepitnote record -d 2
+./shepitnote transcribe recordings/<date>/meeting_<ts>/meeting_<ts>.wav -m tiny
+./shepitnote summarize recordings/<date>/meeting_<ts>/meeting_<ts>.txt -o llama3.2:1b
+
+# Verbose output for any command
 DEBUG=true ./shepitnote full -d 5 -m tiny
 ```
 
+The unit tests import the modules directly and cover the pure, side-effect-free logic
+(`glossary.py`, `meeting_ui.py`, the publishers, track merging, language normalization). When you
+add or change such logic, add or update a test in `tests/`. Keep network/mic/Ollama code thin so
+the testable core stays pure. Recordings are organized as
+`recordings/<YYYYMMDD>/meeting_<YYYYMMDD_HHMMSS>/`.
+
 ## Code Style
 
-### Bash Scripts
+### Bash scripts
 - Use `set -euo pipefail` at the top
-- Use meaningful variable names (UPPER_CASE for constants, lower_case for variables)
-- Comment complex logic
-- Redirect log messages to stderr (`>&2`)
+- Meaningful names (UPPER_CASE for config/constants, lower_case for locals)
+- Comment non-obvious logic
+- Log messages go to **stderr** (`>&2`); only real result data goes to **stdout**
 - Use functions for reusable code
 
-### Python Scripts
-- Follow PEP 8 style guide
-- Use type hints where appropriate
-- Include docstrings for functions and classes
-- Handle errors gracefully
-- Print status messages to stderr, data to stdout
+### Python workers
+- Follow PEP 8; use type hints where they help
+- Docstrings for modules and non-trivial functions
+- Handle errors gracefully with clear messages
+- **Data to stdout, status/errors to stderr** — bash captures a worker's stdout as its result
+- Keep pure logic importable and dependency-light so it stays unit-testable
 
 ### General
 - Keep lines under 100 characters when practical
-- Use consistent indentation (4 spaces for Python, 4 spaces for bash)
-- Add comments for non-obvious code
-- Update documentation when changing functionality
+- 4-space indentation (Python and bash)
+- Update documentation when you change behavior
 
 ## Project Structure
 
 ```
 shepitnote/
-├── shepitnote              # Main orchestration script
-├── record_audio.sh       # Audio recording script
-├── transcribe.py         # Transcription script (faster-whisper)
-├── summarize.py          # Summarization script (Ollama)
-├── requirements.txt      # Python dependencies
-├── README.md             # Main documentation
-├── LICENSE               # MIT License
-├── CONTRIBUTING.md       # This file
-└── recordings/           # Output directory (gitignored)
+├── shepitnote                 # Main CLI / orchestrator (bash): commands, config, guided flow
+├── record_audio.sh            # Audio capture (ffmpeg / pw-record; mic/monitor/both/dual)
+├── compress.sh                # WAV → MP3
+├── setup.sh                   # Create venv/ and install worker deps (--model, --diarize)
+├── transcribe.py              # Transcription (faster-whisper)
+├── cloud_transcribe.py        # Optional cloud transcription (OpenAI-compatible; Groq preset)
+├── summarize.py               # Summarization (Ollama)
+├── glossary.py                # Per-language tech-term normalization (pure, stdlib-only)
+├── diarize.py                 # Speaker diarization (pyannote.audio 4.x)
+├── merge_tracks.py            # Interleave dual You/Remote tracks
+├── merge_diarization.py       # Merge single-track diarization + transcript
+├── label.py, apply_labels.py  # Interactive speaker labeling → final transcript
+├── meeting_ui.py              # Pure helpers for the guided `meeting` flow
+├── hooks/                     # Post-summary publishers (publish.py, confluence_publish.py, slack_publish.py)
+├── tests/                     # Unit tests (unittest)
+├── docs/                      # Topic guides: SETUP, AUDIO, LANGUAGE, DIARIZATION, PUBLISHING, CLOUD
+├── pyproject.toml             # Package metadata + Python deps (extras: diarize, gpu)
+├── .shepitnoterc.example      # Annotated config template (copy → .shepitnoterc, git-ignored)
+├── CLAUDE.md                  # Developer map / architecture notes
+├── README.md, CONTRIBUTING.md, LICENSE
+└── recordings/                # Output (git-ignored): recordings/<date>/meeting_<ts>/
 ```
 
-## Feature Development Priorities
+For the full file-by-file map, the data flow, and where to change things, see **[CLAUDE.md](CLAUDE.md)**.
 
-### High Priority
-1. **Voice-to-clipboard** - Quick voice note → clipboard integration
-2. **Real-time streaming** - Live transcription to cursor position
-3. **Waybar widget** - System tray/status bar integration
-4. **Speaker diarization** - Multi-speaker identification
+## Roadmap & Ideas
 
-### Medium Priority
-1. GUI application (Electron/Tauri)
-2. Background service mode
-3. Global hotkey support
-4. Noise reduction preprocessing
-5. Custom vocabulary support
+Planned work and open ideas live in the [Issues](https://github.com/yuriytkach/shepitnote/issues)
+tracker. If you'd like to work on something, open or comment on an issue first so we can align on
+the approach before you invest time.
 
-### Low Priority (Nice to Have)
-1. Mobile companion app
-2. RESTful API
-3. Search/indexing across transcriptions
-4. Multi-language auto-detection
+## Commit Messages
 
-## Commit Message Guidelines
-
-Use clear, descriptive commit messages:
+This repo uses [Conventional Commits](https://www.conventionalcommits.org/):
 
 ```
-Add voice-to-clipboard feature
+type(scope): short summary
 
-- Implement hotkey capture
-- Add cliphist integration
-- Update documentation
-- Add usage examples
+Longer body explaining the *why* of the change, wrapped at ~72 characters.
+Closes #123
 ```
 
-Format:
-- First line: Brief summary (50 chars or less)
-- Blank line
-- Detailed description (wrap at 72 chars)
-- Reference issues: `Fixes #123` or `Closes #456`
+- **Types:** `feat`, `fix`, `docs`, `refactor`, `chore`, `test`
+- **Scope** is optional but encouraged (the affected area)
+- Reference issues with `Closes #123` / `Fixes #456`
 
-## Documentation
+Examples from the history: `feat(diarize): add --no-diarize flag per run`,
+`fix(meeting): stop guided flow hanging after a successful run`, `docs: restructure into a lean
+README + topical docs/ guides`.
 
-When adding features:
-- Update README.md with usage examples
-- Add inline code comments for complex logic
-- Update help text in scripts (`--help`)
-- Add entries to Future Features section if applicable
+## Updating Documentation
+
+When you change behavior:
+
+- Update `README.md` and the relevant guide in `docs/`
+- Update the `--help` text in `shepitnote` (`print_usage`) and document any new option in `.shepitnoterc.example`
+- Add or update unit tests in `tests/` for any pure logic you touch
 
 ## Questions?
 
 - Open a [Discussion](https://github.com/yuriytkach/shepitnote/discussions)
 - Check existing [Issues](https://github.com/yuriytkach/shepitnote/issues)
-- Read the [Wiki](https://github.com/yuriytkach/shepitnote/wiki) (when available)
 
 ## License
 
