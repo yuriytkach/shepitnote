@@ -193,6 +193,70 @@ log_debug() {
     fi
 }
 
+# --- Step progress + timing --------------------------------------------------
+# The orchestrated workflows (full / process / dual) run several heavy steps in
+# sequence. These helpers give each step a "Step N/total" header and report how
+# long it took, plus a grand total at the end, so a long CPU-bound run shows
+# visible progress instead of going quiet for minutes. Timing is whole-second
+# wall-clock (plenty for minutes-long transcription) and never affects control
+# flow — the timers only print.
+_STEP_TOTAL=0      # total steps in the current workflow (0 = unknown, hides "/N")
+_STEP_NUM=0        # index of the step currently running
+_STEP_START=0      # epoch seconds when the current step began
+_WORKFLOW_START=0  # epoch seconds when steps_init was called
+
+fmt_duration() {
+    # Humanize a whole-second count: 45 -> "45s", 192 -> "3m12s", 3660 -> "1h01m".
+    local s="${1:-0}"
+    if [ "$s" -lt 60 ]; then
+        printf '%ds' "$s"
+    elif [ "$s" -lt 3600 ]; then
+        printf '%dm%02ds' "$((s / 60))" "$((s % 60))"
+    else
+        printf '%dh%02dm' "$((s / 3600))" "$(((s % 3600) / 60))"
+    fi
+}
+
+log_time() {
+    # A timing/stats line, visually distinct from the [INFO]/[SUCCESS] tags.
+    echo -e "${GREEN}      \xe2\x8f\xb1${NC}  $1" >&2
+}
+
+steps_init() {
+    # steps_init [TOTAL] — begin a timed workflow of TOTAL steps (omit or 0 to
+    # hide the "/N"). Resets the step counter and starts the grand-total timer.
+    _STEP_TOTAL="${1:-0}"
+    _STEP_NUM=0
+    _WORKFLOW_START=$(date +%s)
+}
+
+step() {
+    # step "Label" — advance the counter, print the step header, start its timer.
+    _STEP_NUM=$((_STEP_NUM + 1))
+    _STEP_START=$(date +%s)
+    if [ "$_STEP_TOTAL" -gt 0 ]; then
+        log_info "Step ${_STEP_NUM}/${_STEP_TOTAL}: $1"
+    else
+        log_info "Step ${_STEP_NUM}: $1"
+    fi
+}
+
+step_done() {
+    # step_done — report how long the step that `step` started just took.
+    local elapsed=$(( $(date +%s) - _STEP_START ))
+    if [ "$_STEP_TOTAL" -gt 0 ]; then
+        log_time "step ${_STEP_NUM}/${_STEP_TOTAL} finished in $(fmt_duration "$elapsed")"
+    else
+        log_time "step ${_STEP_NUM} finished in $(fmt_duration "$elapsed")"
+    fi
+}
+
+steps_total_done() {
+    # steps_total_done — report total wall-clock elapsed since steps_init.
+    local elapsed=$(( $(date +%s) - _WORKFLOW_START ))
+    log_time "all ${_STEP_NUM} steps finished in $(fmt_duration "$elapsed")"
+}
+
 check_dependencies() {
     local missing=()
 
@@ -736,8 +800,8 @@ full_workflow() {
     # we never capture a full meeting only to die at the transcribe step.
     check_python_env
 
-    # Step 1: Record
-    log_info "Step 1: Recording audio..."
+    # Record (user-paced, so not part of the timed step count below)
+    log_info "Recording audio..."
     local audio_file
 
     # Record the audio
@@ -806,10 +870,15 @@ full_workflow() {
     fi
 
     if [ "$enable_diarization" = true ]; then
-        # Diarization workflow: 7 steps
+        # Diarization workflow. Six fixed steps (diarize, transcribe, merge,
+        # label, apply, summarize) plus a final compress/clean step unless both
+        # compression and --clean are off.
+        local _diar_total=6
+        { [ "$clean_all" = true ] || [ "$enable_compression" = true ]; } && _diar_total=$((_diar_total + 1))
+        steps_init "$_diar_total"
 
-        # Step 2: Diarize
-        log_info "Step 2: Identifying speakers..."
+        # Step: Diarize
+        step "Identifying speakers"
         local speakers_file
         if [ -n "$num_speakers" ]; then
             speakers_file=$(diarize_meeting "$audio_file" -s "$num_speakers")
@@ -821,11 +890,12 @@ full_workflow() {
             log_error "Diarization failed"
             exit 1
         fi
+        step_done
 
         echo ""
 
-        # Step 3: Transcribe (as JSON for merging)
-        log_info "Step 3: Transcribing audio..."
+        # Step: Transcribe (as JSON for merging)
+        step "Transcribing audio"
         local base="${audio_file%.*}"
         local transcription_json="${base}.json"
 
@@ -839,11 +909,12 @@ full_workflow() {
             log_error "Transcription failed"
             exit 1
         fi
+        step_done
 
         echo ""
 
-        # Step 4: Merge diarization + transcription
-        log_info "Step 4: Merging speaker info with transcription..."
+        # Step: Merge diarization + transcription
+        step "Merging speaker info with transcription"
         local diarized_file="${base}_diarized.json"
 
         "$PYTHON" "${SCRIPT_DIR}/merge_diarization.py" "$speakers_file" "$transcription_json" -o "$diarized_file"
@@ -852,11 +923,12 @@ full_workflow() {
             log_error "Merge failed"
             exit 1
         fi
+        step_done
 
         echo ""
 
-        # Step 5: Label speakers interactively
-        log_info "Step 5: Label speakers with their names..."
+        # Step: Label speakers interactively
+        step "Label speakers with their names"
         echo ""
 
         # Call label_speakers without command substitution to allow interactive input
@@ -870,22 +942,24 @@ full_workflow() {
             log_error "Labeling failed"
             exit 1
         fi
+        step_done
 
         echo ""
 
-        # Step 6: Apply labels to create final transcript
-        log_info "Step 6: Creating final transcript with speaker names..."
+        # Step: Apply labels to create final transcript
+        step "Creating final transcript with speaker names"
         local transcription_file=$(apply_speaker_labels "$labeled_file" -f txt)
 
         if [ -z "$transcription_file" ] || [ ! -f "$transcription_file" ]; then
             log_error "Apply labels failed"
             exit 1
         fi
+        step_done
 
         echo ""
 
-        # Step 7: Summarize
-        log_info "Step 7: Generating summary..."
+        # Step: Summarize
+        step "Generating summary"
         local summary_file
         local summarize_args=()
         [ -n "$ollama_model" ] && summarize_args+=(-o "$ollama_model")
@@ -896,20 +970,22 @@ full_workflow() {
             log_error "Summarization failed"
             exit 1
         fi
+        step_done
 
         echo ""
 
-        # Step 8: Compress audio and cleanup
+        # Step: Compress audio and cleanup
         if [ "$clean_all" = true ]; then
-            log_info "Step 8: Removing all audio files..."
+            step "Removing all audio files"
             # Delete both WAV and MP3 if they exist
             [ -f "$audio_file" ] && rm "$audio_file" && log_success "Deleted: $audio_file"
             local mp3_file="${audio_file%.wav}.mp3"
             [ -f "$mp3_file" ] && rm "$mp3_file" && log_success "Deleted: $mp3_file"
             audio_file="(deleted)"
+            step_done
             echo ""
         elif [ "$enable_compression" = true ]; then
-            log_info "Step 8: Compressing audio to MP3..."
+            step "Compressing audio to MP3"
             local mp3_file
             if [ "$keep_wav" = true ]; then
                 mp3_file=$(compress_audio "$audio_file")
@@ -921,9 +997,11 @@ full_workflow() {
             if [ -n "$mp3_file" ] && [ -f "$mp3_file" ]; then
                 audio_file="$mp3_file"
             fi
+            step_done
             echo ""
         fi
 
+        steps_total_done
         log_success "Complete workflow with diarization finished!"
         echo ""
         echo "Files generated:"
@@ -933,15 +1011,22 @@ full_workflow() {
         echo "  Transcription:  $transcription_file"
         echo "  Summary:        $summary_file"
     else
-        # Standard workflow without diarization
+        # Standard workflow without diarization. Two fixed steps (transcribe,
+        # summarize) plus optional compress and trim steps.
+        local _std_total=2
+        { [ "$clean_all" = true ] || [ "$enable_compression" = true ]; } && _std_total=$((_std_total + 1))
+        [ "$enable_trim" = true ] && _std_total=$((_std_total + 1))
+        steps_init "$_std_total"
 
-        # Step 2: Compress WAV → MP3 and delete WAV
+        # Step: Compress WAV → MP3 and delete WAV
         local mp3_file=""
         local transcribe_source="$audio_file"
         if [ "$clean_all" = true ]; then
-            log_info "Step 2/5: Skipping compression (--clean mode, audio will be deleted)"
+            step "Skipping compression (--clean mode, audio will be deleted)"
+            step_done
+            echo ""
         elif [ "$enable_compression" = true ]; then
-            log_info "Step 2/5: Compressing audio to MP3..."
+            step "Compressing audio to MP3"
             if [ "$keep_wav" = true ]; then
                 mp3_file=$(compress_audio "$audio_file")
             else
@@ -950,22 +1035,24 @@ full_workflow() {
             if [ -n "$mp3_file" ] && [ -f "$mp3_file" ]; then
                 transcribe_source="$mp3_file"
             fi
+            step_done
             echo ""
         fi
 
-        # Step 3: Trim silent tail
+        # Step: Trim silent tail
         local trimmed_file=""
         if [ "$enable_trim" = true ] && [ -f "$transcribe_source" ]; then
-            log_info "Step 3/5: Trimming silent tail..."
+            step "Trimming silent tail"
             trimmed_file=$(trim_audio "$transcribe_source")
             if [ -n "$trimmed_file" ] && [ -f "$trimmed_file" ]; then
                 transcribe_source="$trimmed_file"
             fi
+            step_done
             echo ""
         fi
 
-        # Step 4: Transcribe
-        log_info "Step 4/5: Transcribing audio..."
+        # Step: Transcribe
+        step "Transcribing audio"
         local transcription_file
         local transcribe_args=()
         [ -n "$whisper_model" ] && transcribe_args+=(-m "$whisper_model")
@@ -980,11 +1067,12 @@ full_workflow() {
             log_error "Transcription failed - file not found: $transcription_file"
             exit 1
         fi
+        step_done
 
         echo ""
 
-        # Step 5: Summarize
-        log_info "Step 5/5: Generating summary..."
+        # Step: Summarize
+        step "Generating summary"
         local summary_file
         local summarize_args=()
         [ -n "$ollama_model" ] && summarize_args+=(-o "$ollama_model")
@@ -995,6 +1083,7 @@ full_workflow() {
             log_error "Summarization failed"
             exit 1
         fi
+        step_done
 
         echo ""
 
@@ -1021,6 +1110,7 @@ full_workflow() {
             fi
         fi
 
+        steps_total_done
         log_success "Complete workflow finished!"
         echo ""
         echo "Files generated:"
@@ -1111,8 +1201,16 @@ process_dual_meeting() {
     [ -n "$language" ] && log_info "Language: $language"
     echo ""
 
-    # Step 1: Transcribe the voice track (You).
-    log_info "Step 1: Transcribing voice track (You)..."
+    # Fixed steps: transcribe voice + transcribe system + merge + apply +
+    # summarize. Optionally add a Remote-diarization step and a compress/clean
+    # step.
+    local _dual_total=5
+    [ "${DUAL_REMOTE_DIARIZATION:-false}" = "true" ] && _dual_total=$((_dual_total + 1))
+    { [ "$clean_all" = true ] || [ "$enable_compression" = true ]; } && _dual_total=$((_dual_total + 1))
+    steps_init "$_dual_total"
+
+    # Step: Transcribe the voice track (You).
+    step "Transcribing voice track (You)"
     local voice_json="${base}.voice.json"
     local voice_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$voice_wav" -m "$model" -f json -o "$voice_json")
     [ -n "$language" ] && voice_cmd+=(-l "$language")
@@ -1124,10 +1222,11 @@ process_dual_meeting() {
         log_error "Voice track transcription failed"
         return 1
     fi
+    step_done
     echo ""
 
-    # Step 2: Transcribe the system track (Remote).
-    log_info "Step 2: Transcribing system track (Remote)..."
+    # Step: Transcribe the system track (Remote).
+    step "Transcribing system track (Remote)"
     local system_json="${base}.system.json"
     local system_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$system_wav" -m "$model" -f json -o "$system_json")
     [ -n "$language" ] && system_cmd+=(-l "$language")
@@ -1139,14 +1238,15 @@ process_dual_meeting() {
         log_error "System track transcription failed"
         return 1
     fi
+    step_done
     echo ""
 
-    # Step 2b (opt-in): diarize the system (Remote) track so multiple far-side
+    # Step (opt-in): diarize the system (Remote) track so multiple far-side
     # speakers split into [Remote 1] / [Remote 2] / ... Best-effort — any
     # failure falls back to a single [Remote] label and the meeting continues.
     local system_diar_json=""
     if [ "${DUAL_REMOTE_DIARIZATION:-false}" = "true" ]; then
-        log_info "Step 2b: Diarizing system track (splitting Remote per speaker)..."
+        step "Diarizing system track (splitting Remote per speaker)"
         if [ -z "${HF_TOKEN:-}" ]; then
             log_warn "DUAL_REMOTE_DIARIZATION is on but HF_TOKEN is not set — keeping a single [Remote] label."
         else
@@ -1163,12 +1263,13 @@ process_dual_meeting() {
                 log_warn "Remote-track diarization failed — keeping a single [Remote] label."
             fi
         fi
+        step_done
         echo ""
     fi
 
-    # Step 3: Merge tracks — label by origin (You vs Remote). When a system-track
+    # Step: Merge tracks — label by origin (You vs Remote). When a system-track
     # diarization is available, the Remote side is split into per-speaker labels.
-    log_info "Step 3: Merging tracks (You vs Remote)..."
+    step "Merging tracks (You vs Remote)"
     local labeled_file="${base}_speakers_labeled.json"
     local merge_cmd=("$PYTHON" "${SCRIPT_DIR}/merge_tracks.py"
         --voice "$voice_json" --system "$system_json"
@@ -1180,11 +1281,12 @@ process_dual_meeting() {
         log_error "Track merge failed"
         return 1
     fi
+    step_done
     echo ""
 
-    # Step 4: Render final transcript named after the meeting base so status/
+    # Step: Render final transcript named after the meeting base so status/
     # list see meeting_TS.txt.
-    log_info "Step 4: Creating final transcript with You/Remote labels..."
+    step "Creating final transcript with You/Remote labels"
     local transcription_file="${base}.txt"
     apply_speaker_labels "$labeled_file" -f txt -o "$transcription_file" >/dev/null
 
@@ -1192,10 +1294,11 @@ process_dual_meeting() {
         log_error "Apply labels failed"
         return 1
     fi
+    step_done
     echo ""
 
-    # Step 5: Summarize.
-    log_info "Step 5: Generating summary..."
+    # Step: Summarize.
+    step "Generating summary"
     local summary_file
     local summarize_args=()
     [ -n "$ollama_model" ] && summarize_args+=(-o "$ollama_model")
@@ -1206,23 +1309,25 @@ process_dual_meeting() {
         log_error "Summarization failed"
         return 1
     fi
+    step_done
     echo ""
 
-    # Step 6: Compress or clean each track. Silent-tail trimming is skipped in
+    # Step: Compress or clean each track. Silent-tail trimming is skipped in
     # dual mode — per-track trimming would desync turn ordering.
     local voice_audio="$voice_wav"
     local system_audio="$system_wav"
     if [ "$clean_all" = true ]; then
-        log_info "Step 6: Removing all audio files..."
+        step "Removing all audio files"
         [ -f "$voice_wav" ]  && rm "$voice_wav"  && log_success "Deleted: $voice_wav"
         [ -f "$system_wav" ] && rm "$system_wav" && log_success "Deleted: $system_wav"
         [ -f "${base}.voice.mp3" ]  && rm "${base}.voice.mp3"  && log_success "Deleted: ${base}.voice.mp3"
         [ -f "${base}.system.mp3" ] && rm "${base}.system.mp3" && log_success "Deleted: ${base}.system.mp3"
         voice_audio="(deleted)"
         system_audio="(deleted)"
+        step_done
         echo ""
     elif [ "$enable_compression" = true ]; then
-        log_info "Step 6: Compressing tracks to MP3..."
+        step "Compressing tracks to MP3"
         local mp3
         if [ "$keep_wav" = true ]; then
             mp3=$(compress_audio "$voice_wav")
@@ -1235,9 +1340,11 @@ process_dual_meeting() {
             mp3=$(compress_audio "$system_wav" --delete-wav)
             [ -n "$mp3" ] && [ -f "$mp3" ] && system_audio="$mp3"
         fi
+        step_done
         echo ""
     fi
 
+    steps_total_done
     log_success "Dual-track processing complete!"
     echo ""
     echo "Files generated:"
@@ -2499,8 +2606,14 @@ main() {
                 log_info "Processing recording with diarization: $audio_file"
                 echo ""
 
-                # Step 1: Diarize
-                log_info "Step 1: Identifying speakers..."
+                # Six fixed steps plus a final compress/clean step unless both
+                # compression and --clean are off.
+                local _pdiar_total=6
+                { [ "$clean_all" = true ] || [ "$enable_compression" = true ]; } && _pdiar_total=$((_pdiar_total + 1))
+                steps_init "$_pdiar_total"
+
+                # Step: Diarize
+                step "Identifying speakers"
                 local speakers_file
                 if [ -n "$num_speakers" ]; then
                     speakers_file=$(diarize_meeting "$audio_file" -s "$num_speakers")
@@ -2512,10 +2625,11 @@ main() {
                     log_error "Diarization failed"
                     exit 1
                 fi
+                step_done
                 echo ""
 
-                # Step 2: Transcribe
-                log_info "Step 2: Transcribing audio..."
+                # Step: Transcribe
+                step "Transcribing audio"
                 local base="${audio_file%.*}"
                 local transcription_json="${base}.json"
 
@@ -2529,10 +2643,11 @@ main() {
                     log_error "Transcription failed"
                     exit 1
                 fi
+                step_done
                 echo ""
 
-                # Step 3: Merge
-                log_info "Step 3: Merging speaker info with transcription..."
+                # Step: Merge
+                step "Merging speaker info with transcription"
                 local diarized_file="${base}_diarized.json"
 
                 "$PYTHON" "${SCRIPT_DIR}/merge_diarization.py" "$speakers_file" "$transcription_json" -o "$diarized_file"
@@ -2541,10 +2656,11 @@ main() {
                     log_error "Merge failed"
                     exit 1
                 fi
+                step_done
                 echo ""
 
-                # Step 4: Label speakers
-                log_info "Step 4: Label speakers with their names..."
+                # Step: Label speakers
+                step "Label speakers with their names"
                 echo ""
 
                 # Call label_speakers without command substitution to allow interactive input
@@ -2558,20 +2674,22 @@ main() {
                     log_error "Labeling failed"
                     exit 1
                 fi
+                step_done
                 echo ""
 
-                # Step 5: Apply labels
-                log_info "Step 5: Creating final transcript with speaker names..."
+                # Step: Apply labels
+                step "Creating final transcript with speaker names"
                 local transcription_file=$(apply_speaker_labels "$labeled_file" -f txt)
 
                 if [ -z "$transcription_file" ] || [ ! -f "$transcription_file" ]; then
                     log_error "Apply labels failed"
                     exit 1
                 fi
+                step_done
                 echo ""
 
-                # Step 6: Summarize
-                log_info "Step 6: Generating summary..."
+                # Step: Summarize
+                step "Generating summary"
                 local summary_file
                 local summarize_args=()
                 [ -n "$ollama_model" ] && summarize_args+=(-o "$ollama_model")
@@ -2582,19 +2700,21 @@ main() {
                     log_error "Summarization failed"
                     exit 1
                 fi
+                step_done
 
                 echo ""
 
-                # Step 7: Compress audio and cleanup
+                # Step: Compress audio and cleanup
                 if [ "$clean_all" = true ]; then
-                    log_info "Step 7: Removing all audio files..."
+                    step "Removing all audio files"
                     [ -f "$audio_file" ] && rm "$audio_file" && log_success "Deleted: $audio_file"
                     local mp3_file="${audio_file%.wav}.mp3"
                     [ -f "$mp3_file" ] && rm "$mp3_file" && log_success "Deleted: $mp3_file"
                     audio_file="(deleted)"
+                    step_done
                     echo ""
                 elif [ "$enable_compression" = true ]; then
-                    log_info "Step 7: Compressing audio to MP3..."
+                    step "Compressing audio to MP3"
                     local mp3_file
                     if [ "$keep_wav" = true ]; then
                         mp3_file=$(compress_audio "$audio_file")
@@ -2605,9 +2725,11 @@ main() {
                     if [ -n "$mp3_file" ] && [ -f "$mp3_file" ]; then
                         audio_file="$mp3_file"
                     fi
+                    step_done
                     echo ""
                 fi
 
+                steps_total_done
                 log_success "Processing complete with diarization!"
                 echo ""
                 echo "Files generated:"
@@ -2621,14 +2743,21 @@ main() {
                 log_info "Processing recording: $audio_file"
                 echo ""
 
+                # Two fixed steps (transcribe, summarize) plus optional compress
+                # and trim steps.
+                local _simple_total=2
+                { [ "$clean_all" = false ] && [ "$enable_compression" = true ]; } && _simple_total=$((_simple_total + 1))
+                [ "$enable_trim" = true ] && _simple_total=$((_simple_total + 1))
+                steps_init "$_simple_total"
+
                 local mp3_file=""
                 local transcribe_source="$audio_file"
 
-                # Step 1: Compress WAV → MP3, delete WAV
+                # Step: Compress WAV → MP3, delete WAV
                 if [ "$clean_all" = true ]; then
                     : # skip compression, delete everything at end
                 elif [ "$enable_compression" = true ]; then
-                    log_info "Compressing audio to MP3..."
+                    step "Compressing audio to MP3"
                     if [ "$keep_wav" = true ]; then
                         mp3_file=$(compress_audio "$audio_file")
                     else
@@ -2637,35 +2766,43 @@ main() {
                     if [ -n "$mp3_file" ] && [ -f "$mp3_file" ]; then
                         transcribe_source="$mp3_file"
                     fi
+                    step_done
                     echo ""
                 fi
 
-                # Step 2: Trim silent tail
+                # Step: Trim silent tail
                 local trimmed_file=""
                 if [ "$enable_trim" = true ] && [ -f "$transcribe_source" ]; then
-                    log_info "Trimming silent tail..."
+                    step "Trimming silent tail"
                     trimmed_file=$(trim_audio "$transcribe_source")
                     if [ -n "$trimmed_file" ] && [ -f "$trimmed_file" ]; then
                         transcribe_source="$trimmed_file"
                     fi
+                    step_done
                     echo ""
                 fi
 
-                # Step 3: Transcribe
+                # Step: Transcribe
+                step "Transcribing audio"
                 local process_transcribe_args=(-m "$whisper_model")
                 [ -n "$whisper_language" ] && process_transcribe_args+=(-l "$whisper_language")
                 [ -n "$whisper_initial_prompt" ] && process_transcribe_args+=(--initial-prompt "$whisper_initial_prompt")
                 [ -n "$whisper_hotwords" ] && process_transcribe_args+=(--hotwords "$whisper_hotwords")
                 local transcription_file
                 transcription_file=$(transcribe_meeting "$transcribe_source" "${process_transcribe_args[@]}")
+                step_done
 
                 if [ -f "$transcription_file" ]; then
-                    # Step 4: Summarize
+                    echo ""
+
+                    # Step: Summarize
+                    step "Generating summary"
                     local summary_file
                     local summarize_args=()
                     [ -n "$ollama_model" ] && summarize_args+=(-o "$ollama_model")
                     [ -n "$whisper_language" ] && summarize_args+=(-l "$whisper_language")
                     summary_file=$(summarize_meeting "$transcription_file" "${summarize_args[@]}")
+                    step_done
 
                     echo ""
 
@@ -2688,6 +2825,7 @@ main() {
                     fi
 
                     echo ""
+                    steps_total_done
                     log_success "Processing complete!"
                     echo ""
                     echo "Files generated:"
@@ -2716,12 +2854,19 @@ main() {
             ) &
             local _watchdog_pid=$!
 
-            wait "$_proc_pid"
-            local _exit=$?
+            # Capture the processing exit status without tripping `set -e`: a
+            # failed `wait` (e.g. the subshell was killed by the watchdog) would
+            # otherwise abort here before we can inspect the code. `|| _exit=$?`
+            # keeps the failing wait out of set -e's reach.
+            local _exit=0
+            wait "$_proc_pid" || _exit=$?
 
-            # Cancel the watchdog if processing finished in time
-            kill "$_watchdog_pid" 2>/dev/null
-            wait "$_watchdog_pid" 2>/dev/null
+            # Cancel the watchdog if processing finished in time. These are
+            # guarded with `|| true` because after a normal run the watchdog is
+            # still sleeping, so killing it makes `wait` return 143 — which under
+            # `set -e` would abort the command on every SUCCESSFUL run.
+            kill "$_watchdog_pid" 2>/dev/null || true
+            wait "$_watchdog_pid" 2>/dev/null || true
 
             if [ $_exit -eq 143 ] || [ $_exit -eq 137 ]; then
                 # 143 = SIGTERM, 137 = SIGKILL

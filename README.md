@@ -120,10 +120,18 @@ Options:
 ```bash
 ./shepitnote full           # record → compress → trim → transcribe → summarize
 ./shepitnote meeting        # guided: record → review → confirm-gated publish
+./shepitnote record         # record ONLY — no transcription (Ctrl+C to stop; -d SEC for fixed length)
+./shepitnote process-last   # …then transcribe + summarize the most recent recording
 ./shepitnote status         # what's pending / partial / done
 ./shepitnote catchup        # process anything interrupted or missed
-./shepitnote process recordings/<date>/meeting_*/meeting_*.wav   # process an existing file
+./shepitnote process recordings/<date>/meeting_*/meeting_*.wav   # process a specific file
 ```
+
+Record now, process later: `record` captures audio and stops without doing any
+CPU-heavy work, so you can run the transcription/summarization afterwards with
+`process-last` (newest), `process <file>` (a specific one), or `catchup` (all
+pending at once). Each processing step now prints a `Step N/total` header and how
+long it took, plus a total when the run finishes.
 
 ## Highlights
 
