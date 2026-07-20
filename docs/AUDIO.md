@@ -104,6 +104,19 @@ Enable it per run or in `.shepitnoterc`:
 DUAL_REMOTE_DIARIZATION=true AUDIO_SOURCE_TYPE=dual ./shepitnote meeting
 ```
 
+When it is enabled by default in `.shepitnoterc`, **skip it for a single run**
+with `--no-diarize` (you get plain `[You]`/`[Remote]` labels, no per-speaker
+split). Note that an inline `DUAL_REMOTE_DIARIZATION=false ./shepitnote …` does
+**not** work — `.shepitnoterc` is sourced afterwards and resets the toggle — so
+use the flag:
+
+```bash
+./shepitnote --no-diarize process-last     # this run only, overrides the config
+```
+
+Diarization always runs **locally** (pyannote on CPU); `--cloud` never sends any
+audio to a diarization service.
+
 It is **opt-in and best-effort**:
 
 - Requires an `HF_TOKEN` (the same HuggingFace token used elsewhere for pyannote

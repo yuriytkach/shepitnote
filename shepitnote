@@ -16,6 +16,15 @@ if [ -f "$CONFIG_FILE" ]; then
     set +a
 fi
 
+# The --no-diarize flag exports SHEPITNOTE_DIARIZE_OVERRIDE so it overrides
+# DUAL_REMOTE_DIARIZATION even across process-last's re-invocation (the child
+# re-sources .shepitnoterc above, which would otherwise reset the toggle back
+# on). Applied here, after the config source, so the sentinel always wins.
+if [ -n "${SHEPITNOTE_DIARIZE_OVERRIDE:-}" ]; then
+    DUAL_REMOTE_DIARIZATION="$SHEPITNOTE_DIARIZE_OVERRIDE"
+    export DUAL_REMOTE_DIARIZATION
+fi
+
 OUTPUT_DIR="${RECORDINGS_DIR:-${SCRIPT_DIR}/recordings}"
 WHISPER_MODEL="${WHISPER_MODEL:-large-v3}"
 WHISPER_LANGUAGE="${WHISPER_LANGUAGE:-}"
@@ -182,6 +191,9 @@ Options:
     -s, --speakers NUM  Number of speakers (for diarization)
     -t, --title TITLE   Meeting title (prompted if not provided)
     --diarize           Enable speaker diarization in full workflow
+    --no-diarize        Skip speaker diarization for this run (overrides
+                        DUAL_REMOTE_DIARIZATION in .shepitnoterc; works with
+                        process/process-last/full/meeting)
     --no-compress       Skip MP3 compression (keep WAV only)
     --keep-wav          Keep WAV file after compression (default: delete WAV)
     --no-trim           Skip silent tail trimming
@@ -2213,6 +2225,7 @@ meeting_ui() {
                 echo "  --initial-prompt TEXT Decoding-bias sentence (overrides --hotwords)"
                 echo "  --hotwords TERMS      Space-separated tech terms to bias transcription"
                 echo "  --diarize             Enable speaker diarization"
+                echo "  --no-diarize          Skip diarization this run (overrides config)"
                 echo "  -s, --speakers NUM    Number of speakers (requires --diarize)"
                 echo ""
                 echo "AUDIO_SOURCE_TYPE (env) selects capture mode (microphone|monitor|both|dual)."
@@ -2478,18 +2491,25 @@ main() {
     # run. Off by default. Strip it wherever it appears (before or after the
     # command) so per-command parsers never see it, then re-resolve the cloud
     # settings with the new value.
-    local _args=() _a _cloud_flag=""
+    local _args=() _a _cloud_flag="" _nodiarize=""
     for _a in "$@"; do
         case "$_a" in
-            --cloud)    _cloud_flag="true" ;;
-            --no-cloud) _cloud_flag="false" ;;
-            *)          _args+=("$_a") ;;
+            --cloud)      _cloud_flag="true" ;;
+            --no-cloud)   _cloud_flag="false" ;;
+            --no-diarize) _nodiarize="1" ;;
+            *)            _args+=("$_a") ;;
         esac
     done
     if [ ${#_args[@]} -gt 0 ]; then set -- "${_args[@]}"; else set --; fi
     if [ -n "$_cloud_flag" ]; then
         CLOUD="$_cloud_flag"
         cloud_resolve
+    fi
+    # Skip speaker diarization for this run. Export the sentinel so process-last's
+    # re-invoked child (which re-sources .shepitnoterc) honors it too.
+    if [ -n "$_nodiarize" ]; then
+        DUAL_REMOTE_DIARIZATION=false
+        export DUAL_REMOTE_DIARIZATION SHEPITNOTE_DIARIZE_OVERRIDE=false
     fi
 
     if [ $# -eq 0 ]; then
