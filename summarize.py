@@ -7,6 +7,7 @@ Takes transcription text and generates meeting notes, summaries, and action item
 
 import argparse
 import json
+import os
 import sys
 from pathlib import Path
 
@@ -59,14 +60,24 @@ def query_ollama(prompt: str, model: str = "llama3.1:8b", ollama_url: str = DEFA
     Returns:
         Generated text response
     """
+    payload = {
+        "model": model,
+        "prompt": prompt,
+        "stream": False
+    }
+    # Cap the CPU threads Ollama uses for this generation so summarization leaves
+    # cores free (set by shepitnote via CPU_THREADS). Ignored if unset/invalid.
+    num_thread = os.getenv("OLLAMA_NUM_THREAD")
+    if num_thread and num_thread.strip():
+        try:
+            payload["options"] = {"num_thread": int(num_thread)}
+        except ValueError:
+            pass
+
     try:
         response = requests.post(
             f"{ollama_url}/api/generate",
-            json={
-                "model": model,
-                "prompt": prompt,
-                "stream": False
-            },
+            json=payload,
             timeout=300  # 5 minute timeout
         )
         response.raise_for_status()

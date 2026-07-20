@@ -102,6 +102,25 @@
 # Default: unset (disabled)
 #UNLOAD_OLLAMA=1
 
+# --- CPU usage limits (keep the desktop responsive during processing) --------
+# Post-meeting work (faster-whisper transcription, pyannote diarization, Ollama
+# summarization) is CPU-heavy on a machine without a usable GPU. These two knobs
+# stop it from taking the whole system hostage; you can watch the effect in
+# `htop` / `btop` while a meeting processes.
+#
+# CPU_THREADS caps the worker thread pools (faster-whisper, pyannote via
+# OMP_NUM_THREADS, and Ollama via num_thread) so cores stay free for your
+# browser/editor. Default: half the logical CPUs (minimum 1). Set to 0 to leave
+# everything uncapped (each library's own default). Raise it for faster
+# processing, lower it to keep more cores free.
+#CPU_THREADS=12
+#
+# PROCESSING_NICE lowers the scheduling priority (0..19) of the CPU-heavy workers
+# so interactive apps always preempt them — this is what keeps the machine from
+# feeling frozen even at full CPU. Default: 10. Higher = yields more (19 = only
+# runs on otherwise-idle cores); 0 disables the nice wrapper.
+#PROCESSING_NICE=10
+
 # Maximum seconds for the process/process-last commands before timing out.
 # Default: 7200 (2 hours)
 #PROCESS_TIMEOUT=7200

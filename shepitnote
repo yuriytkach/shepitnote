@@ -31,6 +31,44 @@ POST_SUMMARY_HOOK="${POST_SUMMARY_HOOK:-}"  # Script to run after summary is cre
 DEBUG="${DEBUG:-false}"
 PYTHON="${SCRIPT_DIR}/venv/bin/python3"
 
+# --- CPU usage limits (keep the desktop responsive during processing) --------
+# Post-meeting work (faster-whisper transcription, pyannote diarization, Ollama
+# summarization) is CPU-heavy on a GPU-less machine. Two knobs keep it from
+# taking the whole system hostage:
+#   CPU_THREADS     — cap the worker thread pools so cores stay free for other
+#                     apps (default: half the logical CPUs; min 1).
+#   PROCESSING_NICE — scheduling niceness (0..19) applied to the heavy workers,
+#                     so interactive apps always preempt them (default: 10).
+# Raise CPU_THREADS / lower PROCESSING_NICE for faster processing; do the
+# opposite to keep the machine snappier. Set CPU_THREADS=0 to leave everything
+# uncapped (the libraries' own defaults).
+_NCPU="$(nproc 2>/dev/null || echo 4)"
+CPU_THREADS="${CPU_THREADS:-$(( _NCPU / 2 ))}"
+# Only 0 (uncapped) or a positive integer are valid; anything else (empty,
+# negative, non-numeric) falls back to the default. 0 is preserved so the export
+# block below can skip capping entirely.
+case "$CPU_THREADS" in ''|*[!0-9]*) CPU_THREADS="$(( _NCPU / 2 ))";; esac
+PROCESSING_NICE="${PROCESSING_NICE:-10}"
+
+# Export thread caps so every Python worker inherits them: OMP covers
+# torch/pyannote and CTranslate2/faster-whisper; the BLAS vars cover numpy;
+# OLLAMA_NUM_THREAD is forwarded into the Ollama request by summarize.py.
+if [ "$CPU_THREADS" -gt 0 ]; then
+    export CPU_THREADS
+    export OMP_NUM_THREADS="$CPU_THREADS"
+    export OPENBLAS_NUM_THREADS="$CPU_THREADS"
+    export MKL_NUM_THREADS="$CPU_THREADS"
+    export NUMEXPR_NUM_THREADS="$CPU_THREADS"
+    export OLLAMA_NUM_THREAD="$CPU_THREADS"
+fi
+
+# Command prefix that runs a worker at lowered priority. Applied to the
+# CPU-heavy workers (transcription, diarization) — not to recording.
+NICE=()
+if [ "${PROCESSING_NICE:-0}" -gt 0 ] 2>/dev/null; then
+    NICE=(nice -n "$PROCESSING_NICE")
+fi
+
 # Colors for output
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -101,6 +139,10 @@ Environment Variables:
                         to the transcript before summarizing (default: script dir)
     OLLAMA_MODEL        Default Ollama model (default: llama3.1:8b)
     OLLAMA_URL          Ollama API URL (default: http://localhost:11434)
+    CPU_THREADS         Cap worker threads (whisper/pyannote/Ollama) so cores stay
+                        free during processing (default: half the logical CPUs; 0 = uncapped)
+    PROCESSING_NICE     Scheduling niceness 0..19 for the CPU-heavy workers so the
+                        desktop stays responsive (default: 10; 0 = disabled)
     HF_TOKEN            HuggingFace API token (for speaker diarization)
     PROCESS_TIMEOUT     Max seconds for process/process-last before auto-kill (default: 7200)
     TRIM_NOISE_DB       Silence threshold in dB for tail trimming (default: -35)
@@ -505,7 +547,7 @@ transcribe_meeting() {
         output="${base}.${format}"
     fi
 
-    local cmd="\"$PYTHON\" \"${SCRIPT_DIR}/transcribe.py\" \"$audio_file\" -m $model -f $format -o \"$output\""
+    local cmd="${NICE[*]} \"$PYTHON\" \"${SCRIPT_DIR}/transcribe.py\" \"$audio_file\" -m $model -f $format -o \"$output\""
     [ -n "$language" ] && cmd="$cmd -l $language"
     # initial_prompt/hotwords are free text (spaces/quotes); %q-quote so they
     # survive the eval as single arguments.
@@ -787,7 +829,7 @@ full_workflow() {
         local base="${audio_file%.*}"
         local transcription_json="${base}.json"
 
-        local transcribe_cmd=("$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$audio_file" -m "$whisper_model" -f json -o "$transcription_json")
+        local transcribe_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$audio_file" -m "$whisper_model" -f json -o "$transcription_json")
         [ -n "$whisper_language" ] && transcribe_cmd+=(-l "$whisper_language")
         [ -n "$whisper_initial_prompt" ] && transcribe_cmd+=(--initial-prompt "$whisper_initial_prompt")
         [ -n "$whisper_hotwords" ] && transcribe_cmd+=(--hotwords "$whisper_hotwords")
@@ -1072,7 +1114,7 @@ process_dual_meeting() {
     # Step 1: Transcribe the voice track (You).
     log_info "Step 1: Transcribing voice track (You)..."
     local voice_json="${base}.voice.json"
-    local voice_cmd=("$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$voice_wav" -m "$model" -f json -o "$voice_json")
+    local voice_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$voice_wav" -m "$model" -f json -o "$voice_json")
     [ -n "$language" ] && voice_cmd+=(-l "$language")
     [ -n "$initial_prompt" ] && voice_cmd+=(--initial-prompt "$initial_prompt")
     [ -n "$hotwords" ] && voice_cmd+=(--hotwords "$hotwords")
@@ -1087,7 +1129,7 @@ process_dual_meeting() {
     # Step 2: Transcribe the system track (Remote).
     log_info "Step 2: Transcribing system track (Remote)..."
     local system_json="${base}.system.json"
-    local system_cmd=("$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$system_wav" -m "$model" -f json -o "$system_json")
+    local system_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$system_wav" -m "$model" -f json -o "$system_json")
     [ -n "$language" ] && system_cmd+=(-l "$language")
     [ -n "$initial_prompt" ] && system_cmd+=(--initial-prompt "$initial_prompt")
     [ -n "$hotwords" ] && system_cmd+=(--hotwords "$hotwords")
@@ -1109,7 +1151,7 @@ process_dual_meeting() {
             log_warn "DUAL_REMOTE_DIARIZATION is on but HF_TOKEN is not set — keeping a single [Remote] label."
         else
             local diar_out="${base}.system_speakers.json"
-            local diar_cmd=("$PYTHON" "${SCRIPT_DIR}/diarize.py" "$system_wav" -o "$diar_out")
+            local diar_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/diarize.py" "$system_wav" -o "$diar_out")
             [ -n "${DUAL_REMOTE_SPEAKERS:-}" ]     && diar_cmd+=(-s "$DUAL_REMOTE_SPEAKERS")
             [ -n "${DUAL_REMOTE_MIN_SPEAKERS:-}" ] && diar_cmd+=(--min-speakers "$DUAL_REMOTE_MIN_SPEAKERS")
             [ -n "${DUAL_REMOTE_MAX_SPEAKERS:-}" ] && diar_cmd+=(--max-speakers "$DUAL_REMOTE_MAX_SPEAKERS")
@@ -1234,7 +1276,7 @@ diarize_meeting() {
 
     log_info "Identifying speakers in: $audio_file"
 
-    local cmd="\"$PYTHON\" \"${SCRIPT_DIR}/diarize.py\" \"$audio_file\""
+    local cmd="${NICE[*]} \"$PYTHON\" \"${SCRIPT_DIR}/diarize.py\" \"$audio_file\""
     [ -n "$speakers" ] && cmd="$cmd -s $speakers"
 
     eval $cmd
@@ -2477,7 +2519,7 @@ main() {
                 local base="${audio_file%.*}"
                 local transcription_json="${base}.json"
 
-                local transcribe_cmd=("$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$audio_file" -m "$whisper_model" -f json -o "$transcription_json")
+                local transcribe_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$audio_file" -m "$whisper_model" -f json -o "$transcription_json")
                 [ -n "$whisper_language" ] && transcribe_cmd+=(-l "$whisper_language")
                 [ -n "$whisper_initial_prompt" ] && transcribe_cmd+=(--initial-prompt "$whisper_initial_prompt")
                 [ -n "$whisper_hotwords" ] && transcribe_cmd+=(--hotwords "$whisper_hotwords")

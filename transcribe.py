@@ -122,7 +122,8 @@ def transcribe_audio(
     language: str = None,
     output_format: str = "txt",
     initial_prompt: str = None,
-    hotwords: str = None
+    hotwords: str = None,
+    cpu_threads: int = 0
 ) -> dict:
     """
     Transcribe an audio file using faster-whisper
@@ -180,7 +181,10 @@ def transcribe_audio(
                   "This can take a few minutes (large-v3 is ~3 GB); progress "
                   "appears below.", file=sys.stderr)
         sys.stderr.flush()
-        return WhisperModel(model_size, device=dev, compute_type=ctype)
+        # cpu_threads=0 lets CTranslate2 pick its default; a positive value caps
+        # the CPU thread pool so other apps keep some cores (ignored on CUDA).
+        return WhisperModel(model_size, device=dev, compute_type=ctype,
+                            cpu_threads=cpu_threads)
 
     def _run_transcription(mdl):
         kwargs = _build_transcribe_kwargs(language, initial_prompt, hotwords)
@@ -300,6 +304,13 @@ def main():
         audio_path = Path(args.audio_file)
         output_file = audio_path.with_suffix(f".{args.format}")
 
+    # CPU thread cap (0 = library default). Set by shepitnote so transcription
+    # leaves cores free; a bad value falls back to the default rather than erroring.
+    try:
+        cpu_threads = int(os.getenv("CPU_THREADS") or 0)
+    except ValueError:
+        cpu_threads = 0
+
     # Transcribe
     try:
         result = transcribe_audio(
@@ -309,7 +320,8 @@ def main():
             language=args.language,
             output_format=args.format,
             initial_prompt=args.initial_prompt,
-            hotwords=args.hotwords
+            hotwords=args.hotwords,
+            cpu_threads=cpu_threads
         )
 
         # Save results
