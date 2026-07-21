@@ -7,10 +7,46 @@ Shows actual quotes from each speaker and prompts user to identify them
 
 import argparse
 import json
+import os
 import sys
 import random
 from pathlib import Path
 from datetime import datetime, timezone
+
+import roster as roster_mod
+import speaker_guess
+
+
+def guess_speaker_names(data, people, model, ollama_url, self_label="You"):
+    """Best-effort LLM guess of {speaker_id: name} using quotes + roster.
+
+    Returns {} (no guesses) on any failure — a missing requests module, an
+    unreachable Ollama, a timeout, or an unparseable reply — so labeling always
+    falls back cleanly to fully-manual entry. The network call is isolated here;
+    the prompt/parse logic lives in the pure speaker_guess module.
+    """
+    if not people:
+        return {}
+    try:
+        import requests
+    except ImportError:
+        return {}
+
+    prompt = speaker_guess.build_guess_prompt(data, people, self_label=self_label)
+    try:
+        resp = requests.post(
+            f"{ollama_url}/api/generate",
+            json={"model": model, "prompt": prompt, "stream": False},
+            timeout=300,
+        )
+        resp.raise_for_status()
+        text = resp.json().get("response", "")
+    except Exception as exc:  # network/HTTP/JSON — never fatal for labeling
+        print(f"(name-guess unavailable: {exc})", file=sys.stderr)
+        return {}
+
+    valid = speaker_guess._ordered_speaker_ids(data)
+    return speaker_guess.parse_guess_response(text, valid_ids=valid)
 
 
 def load_diarized_json(file_path: str) -> dict:
@@ -102,19 +138,71 @@ def display_quotes(samples: list, max_length: int = 100):
         print(f"  [{timestamp}] \"{text}\"")
 
 
-def interactive_label_speakers(data: dict) -> dict:
+def _current_speaker_ids(data):
+    """Speaker ids present in the segments right now (recomputed after merges)."""
+    seen = []
+    for seg in data["segments"]:
+        sid = seg["speaker_id"]
+        if sid not in seen:
+            seen.append(sid)
+    return seen
+
+
+def _drop_speaker(data, speaker_id):
+    """Remove a speaker's segments entirely (spurious cluster / echo bleed)."""
+    data["segments"] = [s for s in data["segments"] if s["speaker_id"] != speaker_id]
+    data.get("speaker_stats", {}).pop(speaker_id, None)
+    data.get("labels", {}).pop(speaker_id, None)
+
+
+def _resolve_merge_target(token, exclude_id, data):
+    """Resolve a merge-target token to an existing speaker id.
+
+    Accepts either a raw speaker id ("Remote 1") or a name already assigned to a
+    speaker ("Roman"). Returns the speaker id, or None if it can't be resolved
+    (or resolves to the speaker being merged).
     """
-    Interactively prompt user to label each speaker
+    token = token.strip()
+    current = _current_speaker_ids(data)
+    if token in current and token != exclude_id:
+        return token
+    labels = data.get("labels", {})
+    for sid in current:
+        if sid == exclude_id:
+            continue
+        if labels.get(sid, {}).get("name", "").lower() == token.lower():
+            return sid
+    return None
+
+
+def _label_entry(name, people, source):
+    """Build a label dict, attaching a roster role when the name matches."""
+    return {
+        "name": name,
+        "email": None,
+        "role": speaker_guess.role_for(name, people or []),
+        "source": source,
+        "labeled_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z'),
+    }
+
+
+def interactive_label_speakers(data: dict, suggestions=None, people=None) -> dict:
+    """
+    Interactively prompt the user to confirm/correct each speaker.
 
     Args:
-        data: Diarized data with segments
+        data: Diarized/merged data with segments (and optional labels/stats)
+        suggestions: optional {speaker_id: guessed_name} to pre-fill (from the LLM)
+        people: optional roster.Person list, used to attach roles to chosen names
 
     Returns:
-        Updated data with labels
+        Updated data with confirmed labels (segments/stats updated by any merges).
     """
-    # Get unique speakers
-    speakers = sorted(set(seg["speaker_id"] for seg in data["segments"]))
+    suggestions = suggestions or {}
+    people = people or []
+    labels = data.setdefault("labels", {})
 
+    speakers = _current_speaker_ids(data)
     if not speakers:
         print("Error: No speakers found in data", file=sys.stderr)
         sys.exit(1)
@@ -122,63 +210,77 @@ def interactive_label_speakers(data: dict) -> dict:
     print("\nShepitNote Speaker Labeling")
     print("═" * 70)
     print(f"\nFound {len(speakers)} speaker(s) in {data.get('audio_file', 'audio')}")
+    print("Enter = accept the [guess] (or keep the label if none) · type a name to set it")
+    print("m = more quotes · d = drop this speaker · merge <id|name> = same person as another")
     print()
 
-    labels = data.get("labels", {})
-
+    handled = set()
     for speaker_id in speakers:
+        if speaker_id in handled:
+            continue
+        # Skip a speaker merged away by an earlier decision.
+        if speaker_id not in _current_speaker_ids(data):
+            continue
+
         print("─" * 70)
-
-        # Get speaker stats
         stats = data.get("speaker_stats", {}).get(speaker_id, {})
-        total_time = stats.get("total_time", 0)
-        segment_count = stats.get("segment_count", 0)
-
-        print(f"{speaker_id} ({format_time(total_time)}, {segment_count} segments)")
+        print(f"{speaker_id} ({format_time(stats.get('total_time', 0))}, "
+              f"{stats.get('segment_count', 0)} segments)")
         print()
 
-        # Get initial sample quotes
         samples = get_speaker_samples(data, speaker_id, num_samples=3)
         display_quotes(samples)
         print()
 
-        # Prompt for name
+        suggestion = suggestions.get(speaker_id)
         while True:
             try:
-                prompt = f"Who is {speaker_id}? (or 'm' for more quotes) "
+                if suggestion:
+                    prompt = f"Who is {speaker_id}? [{suggestion}] "
+                else:
+                    prompt = f"Who is {speaker_id}? "
                 response = input(prompt).strip()
 
                 if response.lower() == 'm':
-                    # Show more random quotes
                     print()
                     samples = get_speaker_samples(data, speaker_id, num_samples=5, random_samples=True)
                     display_quotes(samples)
                     print()
                     continue
 
+                if response.lower() == 'd':
+                    _drop_speaker(data, speaker_id)
+                    handled.add(speaker_id)
+                    print(f"🗑  Dropped {speaker_id} (segments removed)")
+                    break
+
+                if response.lower().startswith('merge'):
+                    target_token = response[len('merge'):].strip()
+                    target = _resolve_merge_target(target_token, speaker_id, data)
+                    if not target:
+                        print(f"  ? Can't find speaker '{target_token}' to merge into. "
+                              "Use a speaker id or an already-assigned name.")
+                        continue
+                    speaker_guess.merge_speakers(data, speaker_id, target)
+                    handled.add(speaker_id)
+                    tgt_name = labels.get(target, {}).get("name", target)
+                    print(f"🔗 Merged {speaker_id} into {target} ({tgt_name})")
+                    break
+
+                if not response and suggestion:
+                    labels[speaker_id] = _label_entry(suggestion, people, "guess-confirmed")
+                    print(f"✓ Labeled as \"{suggestion}\"")
+                    break
+
                 if response:
-                    labels[speaker_id] = {
-                        "name": response,
-                        "email": None,
-                        "role": None,
-                        "source": "manual",
-                        "labeled_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-                    }
+                    labels[speaker_id] = _label_entry(response, people, "manual")
                     print(f"✓ Labeled as \"{response}\"")
                     break
-                else:
-                    # Allow skipping
-                    skip = input("Skip this speaker? (y/n) ").strip().lower()
-                    if skip == 'y':
-                        labels[speaker_id] = {
-                            "name": speaker_id,
-                            "email": None,
-                            "role": None,
-                            "source": "skipped",
-                            "labeled_at": datetime.now(timezone.utc).isoformat().replace('+00:00', 'Z')
-                        }
-                        print(f"⊘ Skipped, will use {speaker_id}")
-                        break
+
+                # Empty with no suggestion: keep the raw id.
+                labels[speaker_id] = _label_entry(speaker_id, people, "skipped")
+                print(f"⊘ Kept as {speaker_id}")
+                break
 
             except (KeyboardInterrupt, EOFError):
                 print("\n\nLabeling interrupted", file=sys.stderr)
@@ -186,13 +288,10 @@ def interactive_label_speakers(data: dict) -> dict:
 
         print()
 
+    data["num_speakers"] = len(_current_speaker_ids(data))
     print("─" * 70)
     print("✓ All speakers labeled!")
     print()
-
-    # Update data with labels
-    data["labels"] = labels
-
     return data
 
 
@@ -230,6 +329,26 @@ def main():
                        help="Output file (default: input_file_labeled.json)")
     parser.add_argument("--non-interactive", action="store_true",
                        help="Automatically label speakers as Speaker 1, Speaker 2, and so on")
+    parser.add_argument("--roster-dir", default=str(Path(__file__).resolve().parent),
+                       help="Directory holding roster.txt (known participants) used "
+                            "to pre-fill name guesses (default: this script's dir)")
+    parser.add_argument("--roster", default=None,
+                       help="Named roster roster.<NAME>.txt (default: roster.txt); "
+                            "falls back to MEETING_ROSTER env")
+    parser.add_argument("--self-name", default=None,
+                       help="Name of the local ('You') speaker (roster ground truth)")
+    parser.add_argument("--self-role", default=None, help="Role of the local speaker")
+    parser.add_argument("--guess", dest="guess", action=argparse.BooleanOptionalAction,
+                       default=True,
+                       help="Pre-fill each speaker with an LLM name guess from the "
+                            "roster + quotes (default: on; --no-guess to disable)")
+    parser.add_argument("--auto-guess", action="store_true",
+                       help="Apply the LLM guesses non-interactively (no prompts). "
+                            "Review the result — guesses can be wrong")
+    parser.add_argument("--ollama-model", default=os.getenv("OLLAMA_MODEL", "llama3.1:8b"),
+                       help="Ollama model for name guessing (default: OLLAMA_MODEL env)")
+    parser.add_argument("--ollama-url", default=os.getenv("OLLAMA_URL", "http://localhost:11434"),
+                       help="Ollama API URL for name guessing")
 
     args = parser.parse_args()
 
@@ -248,13 +367,37 @@ def main():
         else:
             output_file = input_path.parent / f"{input_path.stem}_labeled.json"
 
+    # Load the roster (known people + roles) so guesses can be roster-constrained
+    # and confirmed names pick up roles. Self identity: CLI overrides env.
+    roster_name = args.roster or os.getenv("MEETING_ROSTER")
+    people = roster_mod.load_roster(args.roster_dir, roster_name)
+    self_name = args.self_name or os.getenv("MEETING_SELF_NAME")
+    self_role = args.self_role or os.getenv("MEETING_SELF_ROLE")
+    if self_name:
+        # Represent an explicit self as a roster person so the guess prompt and
+        # role lookup see it even without a '*' line in roster.txt.
+        if not any(getattr(p, "is_self", False) for p in people):
+            people = people + [roster_mod.Person(self_name, self_role, [], True)]
+
+    # Pre-fill LLM name guesses (best-effort; empty when disabled or unavailable).
+    suggestions = {}
+    if (args.guess or args.auto_guess) and people:
+        print("Guessing speaker names from roster + quotes...", file=sys.stderr)
+        suggestions = guess_speaker_names(data, people, args.ollama_model, args.ollama_url)
+        if suggestions:
+            print(f"Guesses: {suggestions}", file=sys.stderr)
+
     # Label speakers
     try:
         if args.non_interactive:
             print("Non-interactive mode: auto-labeling speakers", file=sys.stderr)
             data = auto_label_speakers(data)
+        elif args.auto_guess:
+            print("Auto-guess mode: applying LLM guesses without prompting "
+                  "(review the result)", file=sys.stderr)
+            data = speaker_guess.apply_names(data, suggestions, people, source="guess")
         else:
-            data = interactive_label_speakers(data)
+            data = interactive_label_speakers(data, suggestions=suggestions, people=people)
 
         # Save results
         save_labeled(data, output_file)

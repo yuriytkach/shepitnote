@@ -197,6 +197,9 @@ Commands:
     process-meeting ID  Reprocess a WHOLE meeting by id (both You/Remote tracks +
                         summary), from .wav or .mp3, even if already processed.
                         Audio is never touched; publishing is off unless --publish.
+    relabel ID          Re-confirm speaker names on a processed meeting (shows an
+                        LLM guess per speaker; accept/correct/merge/drop), then
+                        rebuild transcript + summary. No re-transcription.
     list               List all recordings
     status             Show status of all recordings (what needs processing)
     catchup            Process all unfinished recordings and run post-summary hook
@@ -1784,6 +1787,94 @@ apply_speaker_labels() {
     fi
 }
 
+relabel_meeting() {
+    # Re-run the interactive speaker-name confirm step on an ALREADY-processed
+    # meeting, then regenerate its transcript and summary — no re-transcription.
+    # Reads the meeting's _speakers_labeled.json, shows each Remote N with sample
+    # quotes and an LLM name-guess (from the roster), lets you accept/correct/
+    # merge/drop, then re-applies the names and re-summarizes with the roster.
+    # Re-runnable: keeps a one-time <file>.orig backup of the labels.
+    local meeting_id="" do_guess=true ollama_model="$OLLAMA_MODEL" do_summary=true
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            --no-guess)   do_guess=false; shift ;;
+            -o|--ollama)  ollama_model="$2"; shift 2 ;;
+            --no-summary) do_summary=false; shift ;;
+            -h|--help)    print_usage; return 0 ;;
+            -*)           log_warn "Ignoring unsupported relabel option: $1"; shift ;;
+            *)            [ -z "$meeting_id" ] && meeting_id="$1"; shift ;;
+        esac
+    done
+
+    if [ -z "$meeting_id" ]; then
+        log_error "Usage: $(basename "$0") relabel <meeting-id> [--no-guess] [-o MODEL] [--no-summary]"
+        log_error "  meeting-id: folder name (meeting_YYYYMMDD_HHMMSS), bare timestamp,"
+        log_error "  or a path to the meeting folder / a file in it."
+        return 1
+    fi
+
+    # Resolve the meeting directory (mirrors process-meeting): folder path, a file
+    # inside it, the full folder name, or a bare timestamp under OUTPUT_DIR.
+    local meeting_dir=""
+    if [ -d "$meeting_id" ]; then
+        meeting_dir="$meeting_id"
+    elif [ -f "$meeting_id" ]; then
+        meeting_dir="$(dirname "$meeting_id")"
+    else
+        local name d
+        name="$(basename "${meeting_id%/}")"
+        case "$name" in meeting_*) : ;; *) name="meeting_${name}" ;; esac
+        for d in "$OUTPUT_DIR"/*/"$name"; do
+            [ -d "$d" ] && { meeting_dir="$d"; break; }
+        done
+    fi
+    if [ -z "$meeting_dir" ] || [ ! -d "$meeting_dir" ]; then
+        log_error "Meeting not found: $meeting_id (looked under $OUTPUT_DIR)"
+        return 1
+    fi
+
+    # Locate the labeled JSON (the diarization/merge output the labels live in).
+    local labeled_file=""
+    for f in "$meeting_dir"/*_speakers_labeled.json; do
+        [ -f "$f" ] && { labeled_file="$f"; break; }
+    done
+    if [ -z "$labeled_file" ]; then
+        log_error "No _speakers_labeled.json in $meeting_dir — was this meeting diarized?"
+        log_error "(Single-track meetings without diarization have no speakers to relabel.)"
+        return 1
+    fi
+    local base="${labeled_file%_speakers_labeled.json}"
+
+    log_info "Relabeling speakers in: $(basename "$labeled_file")"
+    # One-time backup of the original labels so a relabel is reversible.
+    [ -f "${labeled_file}.orig" ] || cp "$labeled_file" "${labeled_file}.orig"
+
+    # Interactive confirm step, writing back to the same file. label.py reads
+    # /dev/tty so this works even if stdout is redirected. Roster + self identity
+    # and the guess model come from config; --no-guess skips the LLM pre-fill.
+    local label_cmd=("$PYTHON" "${SCRIPT_DIR}/label.py" "$labeled_file" -o "$labeled_file"
+        --roster-dir "$ROSTER_DIR" --ollama-model "$ollama_model" --ollama-url "$OLLAMA_URL")
+    [ "$do_guess" = false ]          && label_cmd+=(--no-guess)
+    [ -n "$MEETING_ROSTER" ]         && label_cmd+=(--roster "$MEETING_ROSTER")
+    [ -n "$MEETING_SELF_NAME" ]      && label_cmd+=(--self-name "$MEETING_SELF_NAME")
+    [ -n "$MEETING_SELF_ROLE" ]      && label_cmd+=(--self-role "$MEETING_SELF_ROLE")
+    "${label_cmd[@]}" </dev/tty || { log_error "Relabeling failed"; return 1; }
+
+    # Regenerate the final transcript with the confirmed names.
+    echo ""
+    log_info "Regenerating transcript with confirmed names..."
+    apply_speaker_labels "$labeled_file" -f txt -o "${base}.txt" >/dev/null
+
+    if [ "$do_summary" = true ]; then
+        echo ""
+        log_info "Re-summarizing with the roster..."
+        summarize_meeting "${base}.txt" -o "$ollama_model" >/dev/null
+        log_success "Relabel complete. Updated: $(basename "${base}.txt"), $(basename "${base}_summary.md")"
+    else
+        log_success "Relabel complete. Updated: $(basename "${base}.txt") (summary unchanged)"
+    fi
+}
+
 compress_audio() {
     local audio_file="$1"
     shift
@@ -2748,7 +2839,7 @@ main() {
     # they fail with a clear, actionable message instead of a cryptic
     # missing-binary error mid-run. (full/meeting check it before recording.)
     case "$command" in
-        transcribe|process|process-last|process-meeting)
+        transcribe|process|process-last|process-meeting|relabel)
             check_python_env
             ;;
     esac
@@ -2756,7 +2847,7 @@ main() {
     # Warn once, up front, when cloud mode will send data off the machine. The
     # guided `meeting` flow prints its own banner + confirm inside meeting_ui.
     case "$command" in
-        transcribe|process|process-last|process-meeting|full|catchup)
+        transcribe|process|process-last|process-meeting|relabel|full|catchup)
             cloud_banner
             ;;
     esac
@@ -3320,6 +3411,9 @@ main() {
             ;;
         process-meeting)
             reprocess_meeting "$@"
+            ;;
+        relabel)
+            relabel_meeting "$@"
             ;;
         full)
             full_workflow "$@"
