@@ -1,49 +1,78 @@
 # ShepitNote
 
-**Private, local, multilingual meeting notes for Linux — record, transcribe, label who said what, summarize, and publish, all on your own machine.**
+**A private, local-first meeting-notes workflow for Linux, built for multilingual engineering calls.**
 
-ShepitNote records a meeting, transcribes it with faster-whisper, labels who said what, and summarizes it with a local LLM (Ollama) — then, at your choice, publishes the full notes to Confluence and a short TL;DR to Slack. Everything runs locally by default — no cloud services, nothing leaves your machine — with an optional, opt-in [cloud mode](docs/CLOUD.md) for when you'd rather trade privacy for speed and a stronger model on a non-sensitive meeting. The name is from Ukrainian *шепіт* ("whisper") — a nod to the quiet, local ethos and to the Whisper model under the hood.
+ShepitNote records a meeting, keeps recoverable source audio, transcribes it, attributes who said what, produces structured notes, and optionally publishes them to Confluence and Slack. It is designed around meetings that mix **Ukrainian, Russian, and English**, including English technical vocabulary inside Cyrillic speech.
 
-It's built for meetings that mix **Ukrainian, Russian, and English** (with English tech terms), adding dual-track *You/Remote* capture, real-time echo cancellation for open-speaker calls, per-meeting language selection, tech-term accuracy tuning, and a guided review-then-confirm publishing flow on top of the original pipeline.
+The default workflow stays on your machine: faster-whisper handles transcription and Ollama handles summarization. An explicit, opt-in [cloud mode](docs/CLOUD.md) is available when privacy requirements allow trading local processing for speed or stronger models.
 
-> A fork of **[peteonrails/hushnote](https://github.com/peteonrails/hushnote)** (MIT, © Peter Jackson), extended for Linux/PipeWire, multilingual meetings, and Confluence/Slack publishing. See [Credits](#credits).
+> ShepitNote is a fork of **[peteonrails/hushnote](https://github.com/peteonrails/hushnote)** (MIT, © Peter Jackson). It has evolved from a simple recorder/transcriber into a recoverable meeting-notes application for Linux/PipeWire, multilingual engineering teams, speaker review, and controlled publishing.
 
-## How ShepitNote differs from hushnote
+## What ShepitNote is
 
-Upstream **[hushnote](https://github.com/peteonrails/hushnote)** is an excellent general-purpose, privacy-first meeting recorder → transcriber → summarizer for Linux. ShepitNote keeps all of that and specializes it for one audience: **multilingual (Ukrainian / Russian / English) engineering teams** who want clean, attributed notes pushed into the tools they already live in — with nothing leaving the machine unless they say so.
+ShepitNote is not primarily a general dictation tool or a thin wrapper around Whisper. It is an end-to-end workflow for turning a real call into usable team knowledge:
 
-**What this fork adds on top of hushnote:**
+```text
+capture recoverable audio
+        ↓
+transcribe You and Remote tracks
+        ↓
+review speaker attribution and terminology
+        ↓
+generate summary, decisions, and action items
+        ↓
+confirm and publish to Confluence / Slack
+```
 
-- **🎧 Dual-track You/Remote capture** — records your mic and the call audio as two synchronized tracks and labels every line by its origin (You vs. Remote), so your own voice is always cleanly separated — no diarization guessing. Several people on the far side share one `Remote` label by default; flip on opt-in remote-track diarization to split them into `Remote 1`/`Remote 2`/… while `You` stays untouched. → [docs/AUDIO.md](docs/AUDIO.md#dual-track-youremote-recording)
-- **🔊 Real-time echo cancellation** — a one-command WebRTC toggle (`aec on`/`off`) so meetings on open laptop speakers (no headset) don't record the remote side back through your mic. → [docs/AUDIO.md](docs/AUDIO.md#echo-cancellation-open-speaker-meetings)
-- **🌐 First-class uk / ru / en** — explicit per-meeting language choice that fixes Ukrainian being mislabeled as Russian, `large-v3` by default, plus English tech-term accuracy via hotwords + a per-language glossary. → [docs/LANGUAGE.md](docs/LANGUAGE.md)
-- **📤 Confluence + Slack publishing** — full notes to a Confluence page (created/updated idempotently) and a short TL;DR to Slack, with a dispatcher to do both. → [docs/PUBLISHING.md](docs/PUBLISHING.md)
-- **✅ Guided, confirm-gated flow** — `shepitnote meeting` walks record → review → edit title → confirm each publish target; nothing is sent without an explicit yes, and it works over SSH. → [docs/PUBLISHING.md](docs/PUBLISHING.md#guided-flow-review-then-confirm-gated-publishing)
+The source recording remains available for reprocessing. You can retry a meeting with a different language, Whisper model, summary model, glossary, or speaker labeling without recording it again.
 
-| | hushnote (upstream) | ShepitNote (this fork) |
-|---|---|---|
-| **Language** | auto-detect, one language per file | first-class **uk / ru / en**, explicit per-meeting choice, `large-v3` default, English tech-term accuracy |
-| **Who said what** | one mixed track (diarization guesses) | **dual-track You/Remote**, labeled by track of origin |
-| **Open-speaker calls** | mic records the remote echo | **real-time WebRTC echo cancellation** (`aec on`/`off`) |
-| **Publishing** | one generic post-summary hook | first-class **Confluence** + **Slack** publishers, and a dispatcher |
-| **Control** | the hook fires automatically | a guided **review → per-target confirm** flow |
-| **Privacy** | 100% local | 100% local by default; **opt-in cloud mode** when you want it |
+### Best fit
 
-Rule of thumb: if your meetings are English-only and you just want a local transcript + summary, upstream hushnote is a great fit. If they mix Ukrainian/Russian with English tech vocabulary and you publish notes to Confluence and Slack, that's exactly what ShepitNote is tuned for.
+ShepitNote is especially useful when:
 
-## Features
+- you run Linux with PipeWire or PulseAudio;
+- calls mix Ukrainian, Russian, English, and English technical terms;
+- you want your own microphone separated reliably from the remote call;
+- several remote participants may need diarization and human-readable names;
+- notes need review before they are published;
+- Confluence and Slack are part of the team workflow;
+- local processing and recoverability matter more than a polished desktop UI.
 
-- **🎙️ Flexible capture** — system audio, mic, both mixed, or two synchronized You/Remote tracks via PulseAudio/PipeWire
-- **🔊 Echo cancellation** — real-time WebRTC canceller for headset-free, open-speaker calls
-- **📝 Offline transcription** — faster-whisper; CPU by default, NVIDIA GPU when available; per-meeting or auto language
-- **🔤 Tech-term accuracy** — hotwords/initial-prompt bias + a per-language Cyrillic→Latin glossary applied before summarization
-- **✂️ Silent-tail trimming** — binary-search detection removes silent tails fast, regardless of file length
-- **👥 Speaker diarization** — optional "who spoke when" with interactive labeling
-- **🤖 Local summarization** — structured notes via Ollama: summary, discussion, decisions, action items
-- **📤 Publishing** — Confluence (full notes) + Slack (TL;DR), automatic or confirm-gated
-- **📋 Status & catchup** — see what's pending / partial / done; reprocess anything missed
-- **☁️ Optional cloud mode** — opt in per run (`--cloud`) to offload summaries to Ollama Cloud and transcription to a cloud Whisper API (Groq by default) for speed and a stronger model; off by default
-- **🔒 Private by default** — all processing is local, no internet required after setup; cloud mode is the only exception, and only when you turn it on
+It may be more machinery than you need for simple English-only dictation. For that use case, consider upstream [hushnote](https://github.com/peteonrails/hushnote) or a dedicated push-to-talk project such as [Voxtype](https://github.com/peteonrails/voxtype).
+
+## Why it differs from Hushnote and Voxtype
+
+ShepitNote shares its original pipeline with Hushnote and some speech-processing concerns with Voxtype, but it has a different product boundary.
+
+| | Hushnote | Voxtype | ShepitNote |
+|---|---|---|---|
+| **Primary job** | Local meeting recording, transcription, and summary | Wayland voice-to-text and dictation, with meeting support | Recoverable meeting notes from capture through reviewed publishing |
+| **Capture model** | General meeting audio | Push-to-talk plus chunked meeting capture | Single or synchronized **You / Remote** tracks |
+| **Speaker model** | Mixed-track diarization | Source attribution and experimental voice clustering | Track-based You/Remote attribution plus optional remote-only diarization and relabeling |
+| **Language focus** | General Whisper auto-detection | Configurable engines and constrained language candidates | Tuned workflow for **uk / ru / en** and English engineering terminology |
+| **Output workflow** | Transcript and summary hook | Transcript/export/summarize commands | Review, reprocess, speaker naming, structured notes, Confluence and Slack |
+| **Recovery model** | Retained recordings | Meeting mode is evolving | Audio-first storage, status/catchup, and whole-meeting reprocessing |
+
+This is not a claim that ShepitNote should reimplement every capability of those projects. The intended direction is to keep the meeting workflow specialized while making transcription components more replaceable. See **[Project direction](docs/PROJECT_DIRECTION.md)**.
+
+## Current capabilities
+
+- **Dual-track meeting capture** — record your microphone as `You` and call audio as `Remote`, then interleave the tracks by timestamp.
+- **Real-time echo cancellation** — WebRTC AEC for open-speaker calls where the remote side would otherwise leak back into your mic.
+- **Recoverable recordings** — retain meeting audio and reprocess a complete meeting later.
+- **Local transcription** — faster-whisper on CPU by default, with per-meeting model and language selection.
+- **Multilingual tuning** — first-class Ukrainian, Russian, and English workflow, hotwords, initial prompts, and per-language Cyrillic-to-Latin glossary rules.
+- **Speaker workflow** — optional diarization, guided labels, participant roster support, and relabeling of saved meetings.
+- **Structured local summaries** — Ollama produces summaries, discussion notes, decisions, and action items.
+- **Controlled publishing** — full notes to Confluence and a concise Slack message, either automatically or through a confirm-gated guided flow.
+- **Status and catchup** — identify pending, partial, and completed meetings and resume interrupted processing.
+- **Optional cloud processing** — explicitly opt in to cloud transcription and/or summarization for non-sensitive meetings.
+
+## Important current limitation: mixed languages
+
+Whisper language detection is performed once near the beginning of a file, so automatic detection effectively chooses one language for the whole track. In a meeting that switches between Ukrainian, Russian, and English, explicit `-l uk`, `-l ru`, or `-l en` may still be more reliable than `auto`, but no single choice is perfect for every section.
+
+Chunk-level constrained language selection is planned and tracked in [#15](https://github.com/yuriytkach/shepitnote/issues/15). Until it is implemented, choose the dominant meeting language and use hotwords/glossary rules for technical vocabulary. See [docs/LANGUAGE.md](docs/LANGUAGE.md).
 
 ## Quick start
 
@@ -51,36 +80,63 @@ Rule of thumb: if your meetings are English-only and you just want a local trans
 git clone https://github.com/yuriytkach/shepitnote.git
 cd shepitnote
 
-# 1. System dependencies (names vary by distro)
+# System dependencies (names vary by distro)
 sudo apt install ffmpeg pipewire-pulse python3-venv     # Debian / Ubuntu / KDE neon
-# Arch / CachyOS:  yay -S ffmpeg pipewire-pulse python
+# Arch / CachyOS: yay -S ffmpeg pipewire-pulse python
 
-# 2. Python environment (creates ./venv and installs faster-whisper etc.)
+# Python environment and transcription dependencies
 ./setup.sh                       # add --model small to pre-download a Whisper model
 
-# 3. A local summarization model in Ollama
+# Local summarization
 curl -fsSL https://ollama.com/install.sh | sh
-ollama pull llama3.1:8b          # or any local instruction-tuned model
+ollama pull llama3.1:8b          # or another instruction-tuned model
 
-# Record a meeting (Ctrl+C to stop) → transcribe → summarize
-./shepitnote full
+# Guided meeting workflow
+./shepitnote meeting
 ```
 
-Full install notes, first-run test, and recommended settings: **[docs/SETUP.md](docs/SETUP.md)**.
+Full installation notes, first-run tests, and recommended settings: **[docs/SETUP.md](docs/SETUP.md)**.
+
+## Recommended meeting workflow
+
+For calls, configure dual-track capture and enable AEC when using open speakers:
+
+```bash
+./shepitnote aec on
+./shepitnote meeting
+```
+
+The guided flow records the meeting, processes both tracks, lets you review the title and output, and asks before publishing anything.
+
+To record now and process later:
+
+```bash
+./shepitnote record
+./shepitnote process-last
+```
+
+To reprocess an existing complete meeting:
+
+```bash
+./shepitnote process-meeting 20260720_190326
+./shepitnote process-meeting 20260720_190326 -l uk -o another-model
+```
+
+`process-meeting` reads the retained WAV or MP3 tracks, rebuilds the combined transcript and summary, and does not publish unless `--publish` is supplied.
 
 ## Configuration
 
-Copy the annotated example and edit to taste:
+Copy the annotated example:
 
 ```bash
 cp .shepitnoterc.example .shepitnoterc
 ```
 
-`.shepitnoterc` is sourced at startup and git-ignored. It documents every option — audio backend, Whisper model/language, Ollama model, the opt-in cloud-mode block, tech-term hotwords/glossary, silent-tail thresholds, CPU limits (`CPU_THREADS` / `PROCESSING_NICE`, so processing doesn't hog the machine — see [Troubleshooting](#troubleshooting)), the post-summary hook, and the Confluence/Slack blocks.
+`.shepitnoterc` is sourced at startup and ignored by Git. It documents audio sources, dual-track mode, Whisper model/language, Ollama, cloud processing, hotwords and glossary rules, diarization, CPU limits, publishing, and other options.
 
-## Usage
+## Command reference
 
-```
+```text
 Commands:
     record              Start recording (stop with Ctrl+C)
     transcribe FILE     Transcribe an audio file
@@ -89,135 +145,101 @@ Commands:
     diarize FILE        Identify speakers in an audio file
     label FILE          Label speakers interactively
     apply-labels FILE   Apply labels to create final transcript
+    relabel ID          Revisit speaker names for an existing meeting
     compress FILE       Compress WAV to MP3
-    full                Complete workflow: record, compress, trim, transcribe, summarize
-    meeting             Guided flow: record, review, edit title, confirm-publish
-    process FILE        Process an existing recording (compress, trim, transcribe, summarize)
+    full                Record, compress, trim, transcribe, and summarize
+    meeting             Guided record, review, and confirm-publish flow
+    process FILE        Process one existing recording
     process-last        Process the most recent recording
-    process-meeting ID  Reprocess a whole meeting by id (both tracks + summary), from wav or mp3
-    list                List all recordings
-    status              Show status of all recordings
-    catchup             Process any unfinished recordings and run post-summary hook
-    aec on|off|status   Toggle real-time echo cancellation (open-speaker calls)
+    process-meeting ID  Reprocess a complete meeting from retained tracks
+    list                List recordings
+    status              Show pending, partial, and completed recordings
+    catchup             Resume unfinished recordings and hooks
+    aec on|off|status   Control real-time echo cancellation
 
-Options:
-    -d, --duration SEC      Recording duration (default: manual stop with Ctrl+C)
-    -m, --model MODEL       Whisper model (tiny|base|small|medium|large-v3) (default: large-v3)
-    -l, --language LANG     Language code, e.g. uk, ru, en, or auto (default: auto-detect)
-    --initial-prompt TEXT   Decoding-bias sentence for tech-term spelling (overrides --hotwords)
-    --hotwords TERMS        Space-separated tech terms to bias transcription spelling
+Common options:
+    -d, --duration SEC      Recording duration
+    -m, --model MODEL       Whisper model (default: large-v3)
+    -l, --language LANG     uk, ru, en, or auto
+    --initial-prompt TEXT   Decoding-bias sentence for terminology
+    --hotwords TERMS        Space-separated terms to bias transcription
     -o, --ollama MODEL      Ollama model for summarization
-    --cloud                 Process this run in the cloud: summaries via Ollama
-                            Cloud, transcription via a cloud Whisper API (Groq).
-                            Off by default; --no-cloud forces local (docs/CLOUD.md)
-    -f, --format FMT        Output format (txt|json|srt|vtt|md)
-    -s, --speakers NUM      Number of speakers (for diarization)
-    -t, --title TITLE       Meeting title (prompted if not provided)
-    --diarize               Enable speaker diarization in full workflow
-    --no-diarize            Skip speaker diarization for this run
-    --no-trim               Skip silent tail trimming
-    --keep-untrimmed        Keep full MP3 alongside trimmed version (default: delete)
-    --keep-trimmed          Keep trimmed MP3 after transcription (default: keep)
-    --timeout SECS          Kill processing after SECS seconds (default: 7200)
+    --cloud                 Opt in to configured cloud processing
+    --no-cloud              Force local processing for this run
+    -f, --format FMT        txt, json, srt, vtt, or md
+    -s, --speakers NUM      Expected number of speakers
+    -t, --title TITLE       Meeting title
+    --diarize               Enable diarization
+    --no-diarize            Disable diarization for this run
+    --no-trim               Skip silent-tail trimming
+    --timeout SECS          Processing timeout
 ```
 
-### Common workflows
+Run `./shepitnote help` for the authoritative command list for your checkout.
 
-```bash
-./shepitnote full           # record → compress → trim → transcribe → summarize
-./shepitnote meeting        # guided: record → review → confirm-gated publish
-./shepitnote record         # record ONLY — no transcription (Ctrl+C to stop; -d SEC for fixed length)
-./shepitnote process-last   # …then transcribe + summarize the most recent recording
-./shepitnote status         # what's pending / partial / done
-./shepitnote catchup        # process anything interrupted or missed
-./shepitnote process recordings/<date>/meeting_*/meeting_*.wav   # process a single audio file
-./shepitnote process-meeting 20260720_190326           # RE-do a whole meeting (both tracks + summary), even if already done
-./shepitnote process-meeting 20260720_190326 -o MODEL  # …try a different summary model (nothing is published)
+## Data and processing model
+
+A typical single-track pipeline is:
+
+```text
+record WAV
+  → compress to MP3
+  → trim silent tail
+  → transcribe
+  → summarize
+  → optionally publish
 ```
 
-`process FILE` transcribes exactly the one file you point it at. To redo an
-**entire meeting** — both the You and Remote tracks, then the summary — use
-`process-meeting <id>` instead. It works even after the meeting was already
-processed (it reads the `.mp3` tracks when the `.wav`s are gone) and never
-touches the audio, so you can re-run it with different `-m`/`-o`/`-l` options to
-compare models and languages. It overwrites `meeting_<id>.txt` /
-`_summary.md` and does **not** publish unless you add `--publish`. The id can be
-the folder name (`meeting_20260720_190326`), the bare timestamp
-(`20260720_190326`), or a path to the meeting folder.
+In dual mode, microphone and system audio are recorded separately, transcribed independently, and merged by timestamp. Remote-only diarization can subdivide the remote track while preserving `You` as a reliable track identity.
 
-Record now, process later: `record` captures audio and stops without doing any
-CPU-heavy work, so you can run the transcription/summarization afterwards with
-`process-last` (newest), `process <file>` (a specific one), or `catchup` (all
-pending at once). Each processing step now prints a `Step N/total` header and how
-long it took, plus a total when the run finishes.
+Meeting directories retain the artifacts needed for inspection and reprocessing. See [docs/AUDIO.md](docs/AUDIO.md#output-files) for the exact layout.
 
-## Highlights
+## Project principles
 
-A short intro to each headline capability — follow the link for the full guide.
+- **Audio is the source of truth.** A transcript or summary can be regenerated; a lost recording cannot.
+- **Local by default, cloud by explicit choice.** Uploads should never be surprising.
+- **Reliable attribution before clever inference.** Separate tracks are preferred over guessing when the audio system can provide them.
+- **Human review is part of the workflow.** Names, decisions, and published notes should be correct, not merely automatic.
+- **Meeting application, replaceable engines.** Capture, recovery, review, and publishing belong to ShepitNote; transcription and diarization engines should become pluggable where practical.
+- **Incremental evolution.** The existing working workflow should be refactored and extended without a high-risk rewrite.
 
-### Dual-track You/Remote + echo cancellation
-For calls, set `AUDIO_SOURCE_TYPE=dual` to record your mic (**You**) and the call audio (**Remote**) as two synchronized tracks, interleaved into one `[You]`/`[Remote]` transcript — no diarization guessing. Attribution is **You vs. Remote** by track of origin, so your voice is never mixed up with the call. Several people on the far side share a single `[Remote]` label by default; set `DUAL_REMOTE_DIARIZATION=true` to diarize the remote track only and split them into `[Remote 1]`/`[Remote 2]`/… (`[You]` is never diarized). On open speakers without a headset, run `./shepitnote aec on` first so your mic doesn't record the remote side back as an echo (`aec off` restores everything). → **[docs/AUDIO.md](docs/AUDIO.md)**
-
-### Multilingual (uk / ru / en) + tech terms
-Set the language per meeting (`-l uk|ru|en`) to avoid Ukrainian being transcribed as Russian, and bias English tech terms with hotwords + a per-language glossary applied before summarization. → **[docs/LANGUAGE.md](docs/LANGUAGE.md)**
-
-### Publishing to Confluence & Slack
-Point `POST_SUMMARY_HOOK` at the bundled publishers for automatic publishing, or use `./shepitnote meeting` to review and confirm each target before anything is sent. Confluence pages are updated idempotently; Slack posts a short TL;DR with a link to the notes. → **[docs/PUBLISHING.md](docs/PUBLISHING.md)**
-
-### Speaker diarization
-Optional "who spoke when" with interactive labeling, for multi-person recordings captured on a single track. → **[docs/DIARIZATION.md](docs/DIARIZATION.md)**
-
-### Cloud mode (optional)
-Fully local by default. When a meeting isn't sensitive and you'd rather trade privacy for speed and a stronger model, opt in per run with `./shepitnote --cloud …`: summaries run on an Ollama Cloud model and transcription on a cloud Whisper API (Groq by default, or any OpenAI-compatible host). It's off unless you turn it on, prints a clear warning of what will be uploaded, and — in the guided `meeting` flow — confirms before anything leaves the machine; audio stays local unless you also set a transcription key (`--no-cloud` forces local for a run). → **[docs/CLOUD.md](docs/CLOUD.md)**
-
-## Pipeline
-
-```
-record → WAV
-       → compress to MP3, delete WAV
-       → trim silent tail → meeting_trimmed.mp3
-       → transcribe → meeting.txt
-       → summarize → meeting_summary.md
-       → run POST_SUMMARY_HOOK (if set)
-```
-
-In `dual` mode, trimming is skipped and the two tracks are transcribed and interleaved by timestamp. See [docs/AUDIO.md](docs/AUDIO.md#output-files) for the file layout of each mode. With `--cloud`, the transcribe and summarize steps run on cloud services instead of locally; every other step is unchanged — see [docs/CLOUD.md](docs/CLOUD.md).
+The open architecture and evaluation work is described in [docs/PROJECT_DIRECTION.md](docs/PROJECT_DIRECTION.md).
 
 ## Troubleshooting
 
-**No audio captured** — check your default source and test with a short clip:
+**No audio captured**
+
 ```bash
 pactl list sources short
 pactl set-default-source YOUR_SOURCE_NAME
 ./record_audio.sh -d 5
 ```
 
-**Ukrainian transcribed as Russian** — auto-detect samples only the first ~30s and picks one language for the whole file. Set it explicitly with `-l uk` or `WHISPER_LANGUAGE=uk`. See [docs/LANGUAGE.md](docs/LANGUAGE.md#language-selection-uk--ru--en).
+**Ukrainian is transcribed as Russian** — automatic detection chooses one language for a full file. Set `-l uk` or `WHISPER_LANGUAGE=uk`. See [docs/LANGUAGE.md](docs/LANGUAGE.md#language-selection-uk--ru--en).
 
-**The You track is a duplicate of Remote** — you're on open speakers and the mic is recording the remote audio. Run `./shepitnote aec on` before the call. See [docs/AUDIO.md](docs/AUDIO.md#echo-cancellation-open-speaker-meetings).
+**The You track duplicates Remote** — your open speakers are leaking into the mic. Run `./shepitnote aec on` before the call. See [docs/AUDIO.md](docs/AUDIO.md#echo-cancellation-open-speaker-meetings).
 
-**Ollama not responding** — `systemctl status ollama`, `ollama list`, and pass a model you have with `-o`.
+**Ollama is unavailable** — check `systemctl status ollama` and `ollama list`, then select an installed model with `-o`.
 
-**System sluggish while a meeting processes** — transcription, diarization, and summarization run on the CPU. By default they're capped to half your cores (`CPU_THREADS`) and run at low priority (`PROCESSING_NICE`) so the desktop stays responsive; lower `CPU_THREADS` / raise `PROCESSING_NICE` to free up more. See [docs/SETUP.md](docs/SETUP.md#keeping-the-desktop-responsive-cpu-limits).
-
-More fixes live in [docs/SETUP.md](docs/SETUP.md#troubleshooting) and each topic guide below.
+**The desktop becomes sluggish** — lower `CPU_THREADS` or increase `PROCESSING_NICE`. See [docs/SETUP.md](docs/SETUP.md#keeping-the-desktop-responsive-cpu-limits).
 
 ## Documentation
 
-- **[docs/SETUP.md](docs/SETUP.md)** — install, first-run test, recommended settings
-- **[docs/AUDIO.md](docs/AUDIO.md)** — capture modes, dual-track, echo cancellation, call routing, output files
-- **[docs/LANGUAGE.md](docs/LANGUAGE.md)** — Whisper models, uk/ru/en selection, tech-term accuracy
-- **[docs/PUBLISHING.md](docs/PUBLISHING.md)** — post-summary hook, Confluence, Slack, the guided flow
-- **[docs/DIARIZATION.md](docs/DIARIZATION.md)** — speaker diarization guide
-- **[docs/CLOUD.md](docs/CLOUD.md)** — optional cloud mode: summaries + transcription, providers, cost, privacy
-- **[CONTRIBUTING.md](CONTRIBUTING.md)** — development setup and guidelines
+- **[docs/SETUP.md](docs/SETUP.md)** — installation, first-run test, and recommended settings
+- **[docs/AUDIO.md](docs/AUDIO.md)** — capture modes, dual tracks, AEC, routing, and output files
+- **[docs/LANGUAGE.md](docs/LANGUAGE.md)** — Whisper models, uk/ru/en behavior, hotwords, and glossary rules
+- **[docs/DIARIZATION.md](docs/DIARIZATION.md)** — speaker diarization, labeling, and review
+- **[docs/PUBLISHING.md](docs/PUBLISHING.md)** — hooks, Confluence, Slack, and confirm-gated publishing
+- **[docs/CLOUD.md](docs/CLOUD.md)** — optional providers, configuration, privacy, and cost
+- **[docs/PROJECT_DIRECTION.md](docs/PROJECT_DIRECTION.md)** — product boundary, architectural direction, and roadmap
+- **[CONTRIBUTING.md](CONTRIBUTING.md)** — development setup and contribution guidelines
 
-## License
+## License and credits
 
-MIT — see the [LICENSE](LICENSE) file. The original copyright (© 2025 Peter Jackson) is retained as required by the license.
+MIT — see [LICENSE](LICENSE).
 
-## Credits
+ShepitNote is derived from **[hushnote](https://github.com/peteonrails/hushnote)** by Peter Jackson ([@peteonrails](https://github.com/peteonrails)); the original copyright is retained. The recording → transcription → summarization pipeline and post-summary hook originated there.
 
-ShepitNote is a fork of **[hushnote](https://github.com/peteonrails/hushnote)** by Peter Jackson ([@peteonrails](https://github.com/peteonrails)), used under the MIT License. The original recording → transcription → summarization pipeline and the post-summary hook design come from that project; this fork adds dual-track You/Remote capture, real-time echo cancellation, uk/ru/en language handling, tech-term accuracy (hotwords + glossary), Confluence/Slack publishing with a dispatcher, and the guided `shepitnote meeting` flow.
+ShepitNote adds and continues to develop dual-track You/Remote capture, WebRTC echo cancellation, multilingual engineering-meeting handling, terminology normalization, speaker review and roster workflows, recoverable whole-meeting reprocessing, Confluence/Slack publishing, and the guided meeting flow.
 
-Built on top of [faster-whisper](https://github.com/guillaumekln/faster-whisper), [Ollama](https://ollama.ai), [pyannote.audio](https://github.com/pyannote/pyannote-audio), and [ffmpeg](https://ffmpeg.org).
+Built with [faster-whisper](https://github.com/SYSTRAN/faster-whisper), [Ollama](https://ollama.com), [pyannote.audio](https://github.com/pyannote/pyannote-audio), and [ffmpeg](https://ffmpeg.org).
