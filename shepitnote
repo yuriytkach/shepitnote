@@ -54,6 +54,10 @@ CLOUD_TRANSCRIBE_API_KEY="${CLOUD_TRANSCRIBE_API_KEY:-${GROQ_API_KEY:-}}"
 # an explicit true/false in the environment always wins (e.g. cloud summary but
 # local transcription).
 CLOUD_TRANSCRIBE_EXPLICIT="${CLOUD_TRANSCRIBE:-}"
+# Whether cloud SUMMARIZATION follows the master switch. Empty = follow CLOUD; an
+# explicit true/false always wins — set false for cloud transcription with a
+# LOCAL summary (often nicer notes). The mirror image of CLOUD_TRANSCRIBE above.
+CLOUD_SUMMARIZE_EXPLICIT="${CLOUD_SUMMARIZE:-}"
 
 _is_true() {
     case "$(printf '%s' "${1:-}" | tr '[:upper:]' '[:lower:]')" in
@@ -73,13 +77,23 @@ cloud_resolve() {
         else
             CLOUD_TRANSCRIBE="true"
         fi
-        OLLAMA_MODEL="$CLOUD_SUMMARY_MODEL"
+        # Summarization is cloud by default in cloud mode, but an explicit false
+        # (CLOUD_SUMMARIZE=false / --local-summary) keeps it on the local model —
+        # e.g. cloud transcription for speed, local summary for nicer notes.
+        if [ -n "$CLOUD_SUMMARIZE_EXPLICIT" ] && ! _is_true "$CLOUD_SUMMARIZE_EXPLICIT"; then
+            CLOUD_SUMMARIZE="false"
+            OLLAMA_MODEL="$LOCAL_SUMMARY_MODEL"
+        else
+            CLOUD_SUMMARIZE="true"
+            OLLAMA_MODEL="$CLOUD_SUMMARY_MODEL"
+        fi
     else
         CLOUD_TRANSCRIBE="false"
+        CLOUD_SUMMARIZE="false"
         OLLAMA_MODEL="$LOCAL_SUMMARY_MODEL"
     fi
-    export CLOUD CLOUD_TRANSCRIBE CLOUD_TRANSCRIBE_BASE_URL CLOUD_TRANSCRIBE_MODEL \
-           CLOUD_TRANSCRIBE_API_KEY OLLAMA_MODEL
+    export CLOUD CLOUD_TRANSCRIBE CLOUD_SUMMARIZE CLOUD_TRANSCRIBE_BASE_URL \
+           CLOUD_TRANSCRIBE_MODEL CLOUD_TRANSCRIBE_API_KEY OLLAMA_MODEL
 }
 cloud_resolve
 
@@ -90,7 +104,11 @@ cloud_banner() {
     [ -n "${SHEPITNOTE_CLOUD_BANNER_SHOWN:-}" ] && return 0
     export SHEPITNOTE_CLOUD_BANNER_SHOWN=1
     log_warn "CLOUD MODE ON — data will leave this machine:"
-    log_warn "  * Summary    -> Ollama Cloud model '${CLOUD_SUMMARY_MODEL}' (transcript uploaded)"
+    if _is_true "$CLOUD_SUMMARIZE"; then
+        log_warn "  * Summary    -> Ollama Cloud model '${CLOUD_SUMMARY_MODEL}' (transcript uploaded)"
+    else
+        log_warn "  * Summary    -> LOCAL Ollama model '${LOCAL_SUMMARY_MODEL}' (stays on this machine)"
+    fi
     if _is_true "$CLOUD_TRANSCRIBE"; then
         if [ -n "$CLOUD_TRANSCRIBE_API_KEY" ]; then
             log_warn "  * Transcribe -> ${CLOUD_TRANSCRIBE_MODEL} at ${CLOUD_TRANSCRIBE_BASE_URL} (audio uploaded)"
@@ -190,6 +208,8 @@ Options:
     --cloud             Process this run in the cloud: summaries via Ollama Cloud,
                         transcription via a cloud Whisper API (Groq by default).
                         Off by default; --no-cloud forces local. See docs/CLOUD.md.
+    --local-summary     With --cloud, summarize on the LOCAL Ollama model (cloud
+                        transcription + local summary). --cloud-summary forces cloud.
     -f, --format FMT    Output format: txt, json, srt, vtt, md (default: txt for transcribe, md for summarize)
     -s, --speakers NUM  Number of speakers (for diarization)
     -t, --title TITLE   Meeting title (prompted if not provided)
@@ -231,6 +251,9 @@ Environment Variables:
                         uses a cloud Whisper API when a key is set.
     CLOUD_SUMMARY_MODEL Ollama Cloud model for summaries in cloud mode
                         (default: gpt-oss:120b-cloud, on Ollama's free tier)
+    CLOUD_SUMMARIZE     Set false to summarize LOCALLY even in cloud mode (cloud
+                        transcription + local summary; same as --local-summary).
+                        Empty = follow CLOUD
     CLOUD_TRANSCRIBE_API_KEY  API key for cloud transcription (GROQ_API_KEY is
                         accepted too); if unset, transcription stays local even in
                         cloud mode
@@ -2662,18 +2685,24 @@ main() {
     # run. Off by default. Strip it wherever it appears (before or after the
     # command) so per-command parsers never see it, then re-resolve the cloud
     # settings with the new value.
-    local _args=() _a _cloud_flag="" _nodiarize=""
+    local _args=() _a _cloud_flag="" _nodiarize="" _summary_flag=""
     for _a in "$@"; do
         case "$_a" in
-            --cloud)      _cloud_flag="true" ;;
-            --no-cloud)   _cloud_flag="false" ;;
-            --no-diarize) _nodiarize="1" ;;
-            *)            _args+=("$_a") ;;
+            --cloud)          _cloud_flag="true" ;;
+            --no-cloud)       _cloud_flag="false" ;;
+            --no-diarize)     _nodiarize="1" ;;
+            --local-summary)  _summary_flag="false" ;;   # summarize locally even in cloud mode
+            --cloud-summary)  _summary_flag="true"  ;;   # force cloud summary
+            *)                _args+=("$_a") ;;
         esac
     done
     if [ ${#_args[@]} -gt 0 ]; then set -- "${_args[@]}"; else set --; fi
-    if [ -n "$_cloud_flag" ]; then
-        CLOUD="$_cloud_flag"
+    # Apply the per-run cloud overrides, then re-resolve once. The summary flag
+    # sets the same explicit override CLOUD_SUMMARIZE=... would, so it composes
+    # with --cloud (cloud transcribe + local summary in one run).
+    [ -n "$_summary_flag" ] && CLOUD_SUMMARIZE_EXPLICIT="$_summary_flag"
+    [ -n "$_cloud_flag" ]   && CLOUD="$_cloud_flag"
+    if [ -n "$_cloud_flag" ] || [ -n "$_summary_flag" ]; then
         cloud_resolve
     fi
     # Skip speaker diarization for this run. Export the sentinel so process-last's

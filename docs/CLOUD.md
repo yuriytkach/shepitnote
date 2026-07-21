@@ -52,6 +52,11 @@ Two independent privacy levels fall out of this:
 - **Cloud summary, local audio** (the safe middle ground): set `CLOUD=true` but
   leave the transcription key unset (or set `CLOUD_TRANSCRIBE=false`). Audio
   stays on your machine; only the text transcript is uploaded for summarizing.
+- **Cloud transcription, local summary** (fast transcription, your preferred
+  local notes): set `CLOUD=true` and `CLOUD_SUMMARIZE=false`, or pass
+  `--local-summary` for a single run. Audio is uploaded to the Whisper API for
+  speed, but the transcript is summarized on your local Ollama model and never
+  leaves — handy when the local model writes better notes than the cloud one.
 - **Full cloud**: add a transcription API key so audio is uploaded too.
 
 In the guided `meeting` flow, cloud mode prints exactly which of these will

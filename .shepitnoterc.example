@@ -96,6 +96,13 @@
 # CLOUD=true and CLOUD_TRANSCRIBE=false. An explicit value here always wins over
 # the master switch. Default: follows CLOUD.
 #CLOUD_TRANSCRIBE=false
+#
+# The mirror image — cloud transcription (fast) but a LOCAL summary (many find
+# the local model writes nicer notes): set CLOUD=true and CLOUD_SUMMARIZE=false,
+# or pass --local-summary for a single run. The transcript's audio is uploaded
+# for transcription, but summarizing stays on your local Ollama model.
+# An explicit value always wins over the master switch. Default: follows CLOUD.
+#CLOUD_SUMMARIZE=false
 # ---------------------------------------------------------------------------
 
 # Audio recording backend: ffmpeg or pw-record
