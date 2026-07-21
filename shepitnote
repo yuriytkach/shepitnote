@@ -172,6 +172,9 @@ Commands:
     meeting            Guided flow: record, review, edit title, confirm-publish
     process FILE        Process existing recording (transcribe + diarize + summarize)
     process-last        Process most recent recording (transcribe + diarize + summarize)
+    process-meeting ID  Reprocess a WHOLE meeting by id (both You/Remote tracks +
+                        summary), from .wav or .mp3, even if already processed.
+                        Audio is never touched; publishing is off unless --publish.
     list               List all recordings
     status             Show status of all recordings (what needs processing)
     catchup            Process all unfinished recordings and run post-summary hook
@@ -260,6 +263,9 @@ Examples:
 
     # Guided flow with review + confirm-gated publishing (SSH-friendly)
     $0 meeting
+
+    # Reprocess a whole meeting with different models (experiment freely; no publish)
+    $0 process-meeting 20260720_190326 -m large-v3 -o qwen3:30b-a3b
 
     # List all recordings
     $0 list
@@ -1283,11 +1289,21 @@ process_dual_meeting() {
         esac
     done
 
+    # Resolve each track to its WAV if present, else the compressed MP3. A
+    # reprocess of an already-compressed meeting has only .mp3 tracks left, and
+    # transcribe.py/diarize.py read MP3 fine (via ffmpeg), so no re-decode is
+    # needed. WAV is preferred when both exist. voice_wav/system_wav keep pointing
+    # at the .wav specifically, so the compression step below only ever touches a
+    # real WAV (and skips a track that is already MP3).
     local voice_wav="${base}.voice.wav"
     local system_wav="${base}.system.wav"
+    local voice_src="$voice_wav"
+    local system_src="$system_wav"
+    [ -f "$voice_src" ]  || voice_src="${base}.voice.mp3"
+    [ -f "$system_src" ] || system_src="${base}.system.mp3"
 
-    if [ ! -f "$voice_wav" ] || [ ! -f "$system_wav" ]; then
-        log_error "Dual tracks not found for: $(basename "$base")"
+    if [ ! -f "$voice_src" ] || [ ! -f "$system_src" ]; then
+        log_error "Dual tracks not found for: $(basename "$base") (need .voice + .system as .wav or .mp3)"
         return 1
     fi
 
@@ -1307,7 +1323,7 @@ process_dual_meeting() {
     # Step: Transcribe the voice track (You).
     step "Transcribing voice track (You)"
     local voice_json="${base}.voice.json"
-    local voice_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$voice_wav" -m "$model" -f json -o "$voice_json")
+    local voice_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$voice_src" -m "$model" -f json -o "$voice_json")
     [ -n "$language" ] && voice_cmd+=(-l "$language")
     [ -n "$initial_prompt" ] && voice_cmd+=(--initial-prompt "$initial_prompt")
     [ -n "$hotwords" ] && voice_cmd+=(--hotwords "$hotwords")
@@ -1323,7 +1339,7 @@ process_dual_meeting() {
     # Step: Transcribe the system track (Remote).
     step "Transcribing system track (Remote)"
     local system_json="${base}.system.json"
-    local system_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$system_wav" -m "$model" -f json -o "$system_json")
+    local system_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/transcribe.py" "$system_src" -m "$model" -f json -o "$system_json")
     [ -n "$language" ] && system_cmd+=(-l "$language")
     [ -n "$initial_prompt" ] && system_cmd+=(--initial-prompt "$initial_prompt")
     [ -n "$hotwords" ] && system_cmd+=(--hotwords "$hotwords")
@@ -1346,7 +1362,7 @@ process_dual_meeting() {
             log_warn "DUAL_REMOTE_DIARIZATION is on but HF_TOKEN is not set — keeping a single [Remote] label."
         else
             local diar_out="${base}.system_speakers.json"
-            local diar_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/diarize.py" "$system_wav" -o "$diar_out")
+            local diar_cmd=("${NICE[@]}" "$PYTHON" "${SCRIPT_DIR}/diarize.py" "$system_src" -o "$diar_out")
             [ -n "${DUAL_REMOTE_SPEAKERS:-}" ]     && diar_cmd+=(-s "$DUAL_REMOTE_SPEAKERS")
             [ -n "${DUAL_REMOTE_MIN_SPEAKERS:-}" ] && diar_cmd+=(--min-speakers "$DUAL_REMOTE_MIN_SPEAKERS")
             [ -n "${DUAL_REMOTE_MAX_SPEAKERS:-}" ] && diar_cmd+=(--max-speakers "$DUAL_REMOTE_MAX_SPEAKERS")
@@ -1368,7 +1384,7 @@ process_dual_meeting() {
     local labeled_file="${base}_speakers_labeled.json"
     local merge_cmd=("$PYTHON" "${SCRIPT_DIR}/merge_tracks.py"
         --voice "$voice_json" --system "$system_json"
-        --audio-file "$(basename "$voice_wav")" -o "$labeled_file")
+        --audio-file "$(basename "$voice_src")" -o "$labeled_file")
     [ -n "$system_diar_json" ] && merge_cmd+=(--system-diarization "$system_diar_json")
     "${merge_cmd[@]}"
 
@@ -1409,8 +1425,8 @@ process_dual_meeting() {
 
     # Step: Compress or clean each track. Silent-tail trimming is skipped in
     # dual mode — per-track trimming would desync turn ordering.
-    local voice_audio="$voice_wav"
-    local system_audio="$system_wav"
+    local voice_audio="$voice_src"
+    local system_audio="$system_src"
     if [ "$clean_all" = true ]; then
         step "Removing all audio files"
         [ -f "$voice_wav" ]  && rm "$voice_wav"  && log_success "Deleted: $voice_wav"
@@ -1424,15 +1440,15 @@ process_dual_meeting() {
     elif [ "$enable_compression" = true ]; then
         step "Compressing tracks to MP3"
         local mp3
-        if [ "$keep_wav" = true ]; then
-            mp3=$(compress_audio "$voice_wav")
+        # Only compress a track that still exists as WAV — a reprocess may already
+        # have MP3s (nothing to do), and compressing an MP3 into an MP3 is pointless.
+        local delete_flag=(); [ "$keep_wav" = false ] && delete_flag=(--delete-wav)
+        if [ -f "$voice_wav" ]; then
+            mp3=$(compress_audio "$voice_wav" "${delete_flag[@]}")
             [ -n "$mp3" ] && [ -f "$mp3" ] && voice_audio="$mp3"
-            mp3=$(compress_audio "$system_wav")
-            [ -n "$mp3" ] && [ -f "$mp3" ] && system_audio="$mp3"
-        else
-            mp3=$(compress_audio "$voice_wav" --delete-wav)
-            [ -n "$mp3" ] && [ -f "$mp3" ] && voice_audio="$mp3"
-            mp3=$(compress_audio "$system_wav" --delete-wav)
+        fi
+        if [ -f "$system_wav" ]; then
+            mp3=$(compress_audio "$system_wav" "${delete_flag[@]}")
             [ -n "$mp3" ] && [ -f "$mp3" ] && system_audio="$mp3"
         fi
         step_done
@@ -1448,6 +1464,146 @@ process_dual_meeting() {
     echo "  Labeled:               $labeled_file"
     echo "  Transcription:         $transcription_file"
     echo "  Summary:               $summary_file"
+
+    run_post_summary_hook "$summary_file" && \
+        touch "${summary_file%_summary.md}.hook_done" || true
+}
+
+reprocess_meeting() {
+    # Reprocess an ENTIRE meeting by id: re-run transcription + summary with the
+    # options given, overwriting meeting_<ts>.txt and meeting_<ts>_summary.md.
+    #   * Dual (You/Remote) meetings: BOTH tracks are re-transcribed, merged and
+    #     summarized. Works from .wav OR .mp3, so an already-compressed meeting
+    #     reprocesses without re-recording; the audio is never modified or deleted.
+    #   * Single-track meetings: the one track is re-transcribed and summarized.
+    # Publishing is OFF unless --publish is passed, so you can freely A/B different
+    # Whisper/Ollama models and languages. --cloud / --no-cloud / --no-diarize are
+    # global flags (stripped before dispatch) and compose with this command too.
+    local meeting_id=""
+    local do_publish=false
+    local model="$WHISPER_MODEL"
+    local language="$WHISPER_LANGUAGE"
+    local initial_prompt="$WHISPER_INITIAL_PROMPT"
+    local hotwords="$WHISPER_HOTWORDS"
+    local ollama_model="$OLLAMA_MODEL"
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -m|--model)       model="$2"; shift 2 ;;
+            -l|--language)    language="$2"; shift 2 ;;
+            --initial-prompt) initial_prompt="$2"; shift 2 ;;
+            --hotwords)       hotwords="$2"; shift 2 ;;
+            -o|--ollama)      ollama_model="$2"; shift 2 ;;
+            --publish)        do_publish=true; shift ;;
+            -h|--help)        print_usage; return 0 ;;
+            -*)               log_warn "Ignoring unsupported process-meeting option: $1"; shift ;;
+            *)                [ -z "$meeting_id" ] && meeting_id="$1"; shift ;;
+        esac
+    done
+
+    if [ -z "$meeting_id" ]; then
+        log_error "Usage: $(basename "$0") process-meeting <meeting-id> [options]"
+        log_error "  meeting-id: folder name (meeting_YYYYMMDD_HHMMSS), bare timestamp"
+        log_error "  (YYYYMMDD_HHMMSS), or a path to the meeting folder or a file in it."
+        return 1
+    fi
+
+    # Resolve the meeting directory from: a folder path, a file inside it, the
+    # full folder name, or a bare timestamp.
+    local meeting_dir=""
+    if [ -d "$meeting_id" ]; then
+        meeting_dir="$meeting_id"
+    elif [ -f "$meeting_id" ]; then
+        meeting_dir="$(dirname "$meeting_id")"
+    else
+        local name d
+        name="$(basename "${meeting_id%/}")"
+        case "$name" in meeting_*) : ;; *) name="meeting_${name}" ;; esac
+        for d in "$OUTPUT_DIR"/*/"$name"; do
+            [ -d "$d" ] && { meeting_dir="$d"; break; }
+        done
+    fi
+
+    if [ -z "$meeting_dir" ] || [ ! -d "$meeting_dir" ]; then
+        log_error "Meeting not found: $meeting_id (looked under $OUTPUT_DIR)"
+        return 1
+    fi
+
+    local base="${meeting_dir}/$(basename "$meeting_dir")"
+
+    # Publishing is opt-in. run_post_summary_hook honors this guard var, which is
+    # NOT settable from .shepitnoterc, so it survives the config re-source in the
+    # summarize worker. Export (or clear) it before any processing runs.
+    if [ "$do_publish" = true ]; then
+        unset HUSHNOTE_SKIP_POST_SUMMARY_HOOK
+        log_info "Reprocessing meeting: $(basename "$meeting_dir")  (publishing: ON)"
+    else
+        export HUSHNOTE_SKIP_POST_SUMMARY_HOOK=1
+        log_info "Reprocessing meeting: $(basename "$meeting_dir")  (publishing: off — pass --publish to enable)"
+    fi
+    log_info "Whisper model: $model  |  Ollama model: $ollama_model${language:+  |  Language: $language}"
+    echo ""
+
+    # Dual meeting? Both tracks present (as .wav or .mp3) -> full You/Remote reprocess.
+    if { [ -f "${base}.voice.wav" ] || [ -f "${base}.voice.mp3" ]; } && \
+       { [ -f "${base}.system.wav" ] || [ -f "${base}.system.mp3" ]; }; then
+        local dual_args=(-m "$model" --no-compress)
+        [ -n "$language" ]       && dual_args+=(-l "$language")
+        [ -n "$initial_prompt" ] && dual_args+=(--initial-prompt "$initial_prompt")
+        [ -n "$hotwords" ]       && dual_args+=(--hotwords "$hotwords")
+        [ -n "$ollama_model" ]   && dual_args+=(-o "$ollama_model")
+        local rc=0
+        process_dual_meeting "$base" "${dual_args[@]}" || rc=$?
+        return $rc
+    fi
+
+    # Single-track meeting: transcribe + summarize the one audio file (prefer WAV).
+    local audio="" cand
+    for cand in "${base}.wav" "${base}.mp3"; do
+        [ -f "$cand" ] && { audio="$cand"; break; }
+    done
+    if [ -z "$audio" ]; then
+        log_error "No audio found to reprocess in $(basename "$meeting_dir")"
+        log_error "(expected $(basename "$base").wav/.mp3, or a .voice + .system dual pair)"
+        return 1
+    fi
+
+    log_info "Single-track reprocess: $(basename "$audio")"
+    steps_init 2
+
+    step "Transcribing audio"
+    local transcribe_args=(-m "$model")
+    [ -n "$language" ]       && transcribe_args+=(-l "$language")
+    [ -n "$initial_prompt" ] && transcribe_args+=(--initial-prompt "$initial_prompt")
+    [ -n "$hotwords" ]       && transcribe_args+=(--hotwords "$hotwords")
+    local transcription_file=""
+    transcription_file=$(transcribe_meeting "$audio" "${transcribe_args[@]}") || {
+        log_error "Transcription failed"
+        return 1
+    }
+    [ -f "$transcription_file" ] || { log_error "Transcription failed"; return 1; }
+    step_done
+    echo ""
+
+    step "Generating summary"
+    local summarize_args=()
+    [ -n "$ollama_model" ] && summarize_args+=(-o "$ollama_model")
+    [ -n "$language" ]     && summarize_args+=(-l "$language")
+    local summary_file=""
+    summary_file=$(summarize_meeting "$transcription_file" "${summarize_args[@]}") || {
+        log_error "Summarization failed"
+        return 1
+    }
+    [ -f "$summary_file" ] || { log_error "Summarization failed"; return 1; }
+    step_done
+    echo ""
+
+    steps_total_done
+    log_success "Reprocessing complete!"
+    echo ""
+    echo "Files generated:"
+    echo "  Transcription:  $transcription_file"
+    echo "  Summary:        $summary_file"
 
     run_post_summary_hook "$summary_file" && \
         touch "${summary_file%_summary.md}.hook_done" || true
@@ -2526,7 +2682,7 @@ main() {
     # they fail with a clear, actionable message instead of a cryptic
     # missing-binary error mid-run. (full/meeting check it before recording.)
     case "$command" in
-        transcribe|process|process-last)
+        transcribe|process|process-last|process-meeting)
             check_python_env
             ;;
     esac
@@ -2534,7 +2690,7 @@ main() {
     # Warn once, up front, when cloud mode will send data off the machine. The
     # guided `meeting` flow prints its own banner + confirm inside meeting_ui.
     case "$command" in
-        transcribe|process|process-last|full|catchup)
+        transcribe|process|process-last|process-meeting|full|catchup)
             cloud_banner
             ;;
     esac
@@ -3095,6 +3251,9 @@ main() {
 
             # Call process command with the latest recording
             "$0" process "$latest_recording" "$@"
+            ;;
+        process-meeting)
+            reprocess_meeting "$@"
             ;;
         full)
             full_workflow "$@"

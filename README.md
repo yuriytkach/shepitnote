@@ -94,6 +94,7 @@ Commands:
     meeting             Guided flow: record, review, edit title, confirm-publish
     process FILE        Process an existing recording (compress, trim, transcribe, summarize)
     process-last        Process the most recent recording
+    process-meeting ID  Reprocess a whole meeting by id (both tracks + summary), from wav or mp3
     list                List all recordings
     status              Show status of all recordings
     catchup             Process any unfinished recordings and run post-summary hook
@@ -129,8 +130,20 @@ Options:
 ./shepitnote process-last   # …then transcribe + summarize the most recent recording
 ./shepitnote status         # what's pending / partial / done
 ./shepitnote catchup        # process anything interrupted or missed
-./shepitnote process recordings/<date>/meeting_*/meeting_*.wav   # process a specific file
+./shepitnote process recordings/<date>/meeting_*/meeting_*.wav   # process a single audio file
+./shepitnote process-meeting 20260720_190326           # RE-do a whole meeting (both tracks + summary), even if already done
+./shepitnote process-meeting 20260720_190326 -o MODEL  # …try a different summary model (nothing is published)
 ```
+
+`process FILE` transcribes exactly the one file you point it at. To redo an
+**entire meeting** — both the You and Remote tracks, then the summary — use
+`process-meeting <id>` instead. It works even after the meeting was already
+processed (it reads the `.mp3` tracks when the `.wav`s are gone) and never
+touches the audio, so you can re-run it with different `-m`/`-o`/`-l` options to
+compare models and languages. It overwrites `meeting_<id>.txt` /
+`_summary.md` and does **not** publish unless you add `--publish`. The id can be
+the folder name (`meeting_20260720_190326`), the bare timestamp
+(`20260720_190326`), or a path to the meeting folder.
 
 Record now, process later: `record` captures audio and stops without doing any
 CPU-heavy work, so you can run the transcription/summarization afterwards with

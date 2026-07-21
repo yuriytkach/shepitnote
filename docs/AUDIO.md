@@ -248,3 +248,32 @@ they were recorded):
     ├── meeting_20260310_090012_summary.md         # meeting summary
     └── meeting_20260310_090012_metadata.json      # title, timestamp, mode: dual
 ```
+
+## Reprocessing a meeting
+
+Two commands re-run processing on an already-recorded meeting:
+
+- **`process FILE`** transcribes and summarizes *exactly the one audio file* you
+  point it at. Use it when you only care about a single track.
+- **`process-meeting <id>`** redoes the **whole meeting** — for a dual recording
+  that means both the You and Remote tracks, merged, then summarized; for a
+  single-track meeting, the one track. It reads the `.mp3` tracks when the
+  `.wav`s have already been compressed away, so a meeting that was processed once
+  can be redone without re-recording, and it never modifies or deletes the audio.
+
+```bash
+# id can be the folder name, the bare timestamp, or a path to the folder/a file in it
+shepitnote process-meeting meeting_20260310_090012
+shepitnote process-meeting 20260310_090012
+shepitnote process-meeting recordings/20260310/meeting_20260310_090012
+
+# experiment freely — try different models / languages and compare the results
+shepitnote process-meeting 20260310_090012 -m large-v3 -o gpt-oss:120b-cloud
+shepitnote process-meeting 20260310_090012 -l uk
+shepitnote --cloud process-meeting 20260310_090012        # do this run in the cloud
+```
+
+It **overwrites** `meeting_<id>.txt` and `meeting_<id>_summary.md` each run, and
+does **not** publish (Confluence/Slack) unless you add `--publish` — so you can
+A/B models without spamming your wiki or channel. `--no-diarize` and `--cloud` /
+`--no-cloud` compose with it, exactly as with the other commands.
