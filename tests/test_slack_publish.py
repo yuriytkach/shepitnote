@@ -431,6 +431,66 @@ class TestMainDryRunAndSkip(unittest.TestCase):
             rc = sp.main([summary], ollama_fn=boom)
             self.assertEqual(rc, 0)
 
+    def test_no_confluence_posts_full_summary_without_ollama(self):
+        # No CONFLUENCE_BASE_URL and no page-id marker -> no link to point to, so
+        # the full notes are posted verbatim and the (would-be) TL;DR pass must
+        # never be invoked.
+        with tempfile.TemporaryDirectory() as d:
+            base, summary = self._make_meeting(d, with_page_id=False)
+            import os
+            old = dict(os.environ)
+            os.environ["SLACK_WEBHOOK_URL"] = "https://hooks.slack.com/services/SECRET"
+            os.environ.pop("CONFLUENCE_BASE_URL", None)
+
+            def boom(*a, **k):
+                raise AssertionError("TL;DR must not be generated with no Confluence link")
+
+            captured = {}
+            real_post = sp.post_to_slack
+
+            def fake_post(cfg, payload):
+                captured["payload"] = payload
+
+            try:
+                sp.post_to_slack = fake_post
+                rc = sp.main([summary], ollama_fn=boom)
+            finally:
+                sp.post_to_slack = real_post
+                os.environ.clear()
+                os.environ.update(old)
+            self.assertEqual(rc, 0)
+            self.assertIn("We shipped it and agreed next steps.", captured["payload"]["text"])
+            self.assertNotIn("Confluence", captured["payload"]["text"])
+
+    def test_confluence_link_present_uses_tldr_not_full_summary(self):
+        with tempfile.TemporaryDirectory() as d:
+            base, summary = self._make_meeting(d, with_page_id=True)
+            import os
+            old = dict(os.environ)
+            os.environ["SLACK_WEBHOOK_URL"] = "https://hooks.slack.com/services/SECRET"
+            os.environ["CONFLUENCE_BASE_URL"] = "https://org.atlassian.net/wiki"
+            captured = {}
+            real_post = sp.post_to_slack
+
+            def fake_post(cfg, payload):
+                captured["payload"] = payload
+
+            try:
+                sp.post_to_slack = fake_post
+                rc = sp.main(
+                    [summary],
+                    ollama_fn=lambda *a, **k: "- shipped it\n- next steps",
+                )
+            finally:
+                sp.post_to_slack = real_post
+                os.environ.clear()
+                os.environ.update(old)
+            self.assertEqual(rc, 0)
+            text = captured["payload"]["text"]
+            self.assertIn("shipped it", text)
+            self.assertNotIn("We shipped it and agreed next steps.", text)
+            self.assertIn("pageId=777", text)
+
     def test_missing_config_exits_nonzero(self):
         with tempfile.TemporaryDirectory() as d:
             base, summary = self._make_meeting(d)

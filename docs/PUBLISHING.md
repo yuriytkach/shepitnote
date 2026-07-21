@@ -1,7 +1,8 @@
 # Publishing meeting notes
 
 ShepitNote can publish the full notes to **Confluence** and a short **TL;DR to
-Slack** — automatically after each summary via the post-summary hook, or
+Slack** (or the **full notes** to Slack when there's no Confluence page to link
+to) — automatically after each summary via the post-summary hook, or
 interactively with a confirm-before-send flow. Nothing leaves your machine until
 you publish.
 
@@ -127,11 +128,18 @@ fails (missing config, API/network error) the hook exits non-zero, so shepitnote
 
 ## Slack publishing
 
-ShepitNote ships a second post-summary hook, `hooks/slack_publish.py`, that posts a **short**
-summary of each meeting to Slack (issue #4). It runs a distinct, terser second Ollama pass over
-the summary — a 3-5 bullet TL;DR plus action items, separate from the full notes — renders it as
-Slack mrkdwn, appends a link to the Confluence page when one exists, and posts it via an incoming
-webhook or a bot token. Point `POST_SUMMARY_HOOK` at it to enable Slack only:
+ShepitNote ships a second post-summary hook, `hooks/slack_publish.py`, that posts a summary of each
+meeting to Slack (issue #4). What it posts depends on whether the meeting has a Confluence page to
+point to (a sibling `<base>.confluence_page_id` marker, written by the Confluence publisher):
+
+- **Confluence page available** — runs a distinct, terser second Ollama pass over the summary — a
+  3-5 bullet TL;DR plus action items, separate from the full notes — and appends a
+  `Full meeting notes on Confluence` link.
+- **No Confluence page** (Confluence not configured, or not published for this meeting) — posts the
+  **full notes verbatim**, no second Ollama pass, since Slack is then the only copy of the notes.
+
+Either way the body is rendered as Slack mrkdwn and posted via an incoming webhook or a bot token.
+Point `POST_SUMMARY_HOOK` at it to enable Slack only:
 
 ```bash
 # In .shepitnoterc:
@@ -139,7 +147,8 @@ POST_SUMMARY_HOOK="${HOME}/path/to/shepitnote/hooks/slack_publish.py"
 ```
 
 The TL;DR pass reuses the same `OLLAMA_MODEL` / `OLLAMA_URL` as the main summary (falling back to
-the same `llama3.1:8b` / `http://localhost:11434` defaults), so Ollama must be running.
+the same `llama3.1:8b` / `http://localhost:11434` defaults), so Ollama must be running — except in
+the no-Confluence-page case above, where Slack posts the full notes and Ollama is not called again.
 
 **Configuration** (all read from the environment; set them in `.shepitnoterc`, which is sourced
 before the hook runs — see `.shepitnoterc.example` for the annotated block). Pick **one** of the two
@@ -162,11 +171,12 @@ what keeps a retry from posting the same meeting twice — at most one Slack mes
 leaves a sibling `<base>.confluence_page_id` marker; the Slack hook reads it and (with
 `CONFLUENCE_BASE_URL` set) appends a `Full meeting notes on Confluence` link built as
 `{CONFLUENCE_BASE_URL}/pages/viewpage.action?pageId=<id>` (works on Cloud and Server/DC). With no
-marker or base URL the link is omitted gracefully and the message still posts.
+marker or base URL there is nothing to link to, so — per the full-notes fallback above — the
+complete summary is posted instead of a linkless TL;DR.
 
 **Dry-run — preview before posting.** Run the hook with `--dry-run` (needs no token/webhook) to
-resolve the target and print the short summary and the exact payload without posting. It still
-calls the local Ollama to build the real TL;DR:
+resolve the target and print the message body and the exact payload without posting. When a
+Confluence page is available it still calls the local Ollama to build the real TL;DR:
 
 ```bash
 hooks/slack_publish.py recordings/<date>/meeting_<ts>/meeting_<ts>_summary.md --dry-run

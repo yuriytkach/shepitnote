@@ -1,18 +1,20 @@
 #!/usr/bin/env python3
 
 """
-Post-summary hook: post a SHORT meeting summary to Slack (issue #4).
+Post-summary hook: post a meeting summary to Slack (issue #4).
 
 shepitnote's run_post_summary_hook invokes this as:
 
     hooks/slack_publish.py <base>_summary.md
 
-It (1) reads the full markdown summary, (2) runs a SECOND, terser Ollama pass
-producing a 3-5 bullet TL;DR plus action items (distinct from the full notes),
-(3) renders that to Slack mrkdwn, (4) appends a link to the Confluence page when
-one exists (read from the sibling <base>.confluence_page_id marker written by the
-Confluence publisher, issue #3), and (5) posts it to a channel via an incoming
-webhook or a bot token.
+It (1) reads the full markdown summary, (2) checks for a Confluence page (read
+from the sibling <base>.confluence_page_id marker written by the Confluence
+publisher, issue #3): when one exists, runs a SECOND, terser Ollama pass producing
+a 3-5 bullet TL;DR plus action items and appends a link to the full page; when
+none exists (Confluence disabled, or not yet published this run), skips the
+Ollama pass entirely and uses the full notes verbatim as the message body, since
+Slack is then the only copy of the notes. (3) renders the chosen body to Slack
+mrkdwn, and (4) posts it to a channel via an incoming webhook or a bot token.
 
 Slack posts are NOT idempotent — an incoming-webhook / chat.postMessage POST
 creates a new message every time — so on a confirmed post this hook writes a
@@ -260,12 +262,13 @@ def _message_header(title, date, time):
     return "Meeting notes"
 
 
-def build_message_text(short_summary, title=None, date=None, time=None, confluence_link=None):
+def build_message_text(body, title=None, date=None, time=None, confluence_link=None):
     """Assemble the final Slack message (mrkdwn): a bold header (meeting title +
-    date/time), the short summary, then a 'Full meeting notes on Confluence' link
+    date/time), the message body (short TL;DR or, when there is no Confluence page
+    to link to, the full notes), then a 'Full meeting notes on Confluence' link
     line when a link is available (omitted gracefully otherwise). Links use
     Slack's <url|label> syntax."""
-    parts = ["*" + _message_header(title, date, time) + "*", short_summary.strip()]
+    parts = ["*" + _message_header(title, date, time) + "*", body.strip()]
     if confluence_link:
         parts.append(f"<{confluence_link}|Full meeting notes on Confluence>")
     return "\n\n".join(p for p in parts if p)
@@ -480,28 +483,36 @@ def main(argv=None, ollama_fn=None):
     page_id = read_page_id(base_dir, base)
     confluence_link = build_confluence_link(cfg["confluence_base_url"], page_id)
 
-    # Second, terser Ollama pass -> the short summary.
-    try:
-        short_summary = generate_tldr(
-            md, cfg["ollama_model"], cfg["ollama_url"], ollama_fn=ollama_fn
-        )
-    except SystemExit:
-        # summarize.query_ollama does sys.exit(1) on an Ollama error; surface it as
-        # a non-zero hook exit (so shepitnote retries) rather than exiting the process.
-        print("Error: Ollama TL;DR generation failed (see message above).", file=sys.stderr)
-        return 1
-    except Exception as e:
-        print(f"Error generating TL;DR: {_redact(e, cfg)}", file=sys.stderr)
-        return 1
+    if confluence_link:
+        # The full notes already have a home on Confluence -> second, terser
+        # Ollama pass for a short TL;DR, with a link to the full page.
+        try:
+            body = generate_tldr(
+                md, cfg["ollama_model"], cfg["ollama_url"], ollama_fn=ollama_fn
+            )
+        except SystemExit:
+            # summarize.query_ollama does sys.exit(1) on an Ollama error; surface it
+            # as a non-zero hook exit (so shepitnote retries) rather than exiting
+            # the process.
+            print("Error: Ollama TL;DR generation failed (see message above).", file=sys.stderr)
+            return 1
+        except Exception as e:
+            print(f"Error generating TL;DR: {_redact(e, cfg)}", file=sys.stderr)
+            return 1
+    else:
+        # No Confluence page to point to (Confluence not configured, or not yet
+        # published) -> Slack is the only copy of the notes, so post the FULL
+        # summary verbatim instead of a TL;DR that would otherwise be lossy. No
+        # second Ollama pass needed.
+        body = md
 
-    slack_summary = markdown_to_slack(short_summary)
-    message = build_message_text(slack_summary, title, date, time, confluence_link)
+    message = build_message_text(markdown_to_slack(body), title, date, time, confluence_link)
 
     if dry_run:
         print("=== Slack publish (dry-run) ===")
         print(f"TARGET:          {describe_target(cfg)}")
         print(f"CONFLUENCE LINK: {confluence_link or '(none)'}")
-        print("=== short summary (Slack mrkdwn) ===")
+        print("=== message body (Slack mrkdwn) ===")
         print(message)
         print("=== payload ===")
         print(json.dumps(build_payload(cfg, message), indent=2, ensure_ascii=False))
