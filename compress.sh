@@ -81,9 +81,14 @@ if [ ! -f "$WAV_FILE" ]; then
     exit 1
 fi
 
-# Check if file is actually a WAV
+# Only WAV inputs are compressed. If the file is already compressed (e.g. an
+# .mp3), do NOT re-encode it into a double-extension file (foo.mp3.mp3) and,
+# crucially, do NOT delete it under --delete-wav — that would destroy an original
+# recording. Treat it as already-done: echo the path back so callers use it as-is.
 if [[ ! "$WAV_FILE" =~ \.wav$ ]]; then
-    echo "Warning: File doesn't have .wav extension: $WAV_FILE" >&2
+    echo "Note: '$WAV_FILE' is not a .wav (already compressed) — skipping compression." >&2
+    echo "$WAV_FILE"
+    exit 0
 fi
 
 # Determine output file

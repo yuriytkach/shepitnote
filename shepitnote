@@ -1557,27 +1557,42 @@ reprocess_meeting() {
         return $rc
     fi
 
-    # Single-track meeting: transcribe + summarize the one audio file (prefer WAV).
-    local audio="" cand
+    # Not a full dual pair. Find a single track to reprocess, in order: a plain
+    # single-track recording, then a lone surviving You or Remote track (a dual
+    # meeting can end up with just one track if the other was lost/deleted).
+    local audio="" missing_note="" cand
     for cand in "${base}.wav" "${base}.mp3"; do
         [ -f "$cand" ] && { audio="$cand"; break; }
     done
+    if [ -z "$audio" ]; then
+        for cand in "${base}.voice.wav" "${base}.voice.mp3"; do
+            [ -f "$cand" ] && { audio="$cand"; missing_note="only the voice (You) track is present — the system (Remote) track is missing"; break; }
+        done
+    fi
+    if [ -z "$audio" ]; then
+        for cand in "${base}.system.wav" "${base}.system.mp3"; do
+            [ -f "$cand" ] && { audio="$cand"; missing_note="only the system (Remote) track is present — the voice (You) track is missing"; break; }
+        done
+    fi
     if [ -z "$audio" ]; then
         log_error "No audio found to reprocess in $(basename "$meeting_dir")"
         log_error "(expected $(basename "$base").wav/.mp3, or a .voice + .system dual pair)"
         return 1
     fi
+    [ -n "$missing_note" ] && log_warn "$missing_note; reprocessing that track alone."
 
     log_info "Single-track reprocess: $(basename "$audio")"
     steps_init 2
 
+    # Always write the transcript to the meeting base name (meeting_<ts>.txt), not
+    # after the source track's filename, so status/list/publishers recognize it.
+    local transcription_file="${base}.txt"
     step "Transcribing audio"
-    local transcribe_args=(-m "$model")
+    local transcribe_args=(-m "$model" -o "$transcription_file")
     [ -n "$language" ]       && transcribe_args+=(-l "$language")
     [ -n "$initial_prompt" ] && transcribe_args+=(--initial-prompt "$initial_prompt")
     [ -n "$hotwords" ]       && transcribe_args+=(--hotwords "$hotwords")
-    local transcription_file=""
-    transcription_file=$(transcribe_meeting "$audio" "${transcribe_args[@]}") || {
+    transcribe_meeting "$audio" "${transcribe_args[@]}" >/dev/null || {
         log_error "Transcription failed"
         return 1
     }
