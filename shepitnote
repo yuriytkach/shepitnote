@@ -285,24 +285,56 @@ Environment Variables:
     DEBUG               Enable debug output (set to 'true' to enable)
 
 Examples:
-    # Record a meeting (stop with Ctrl+C)
-    $0 record
-
-    # Record for 1 hour
-    $0 record -d 3600
-
-    # Transcribe an audio file
-    $0 transcribe recordings/meeting_20251005_143022.wav
-
-    # Complete workflow: record, transcribe, and summarize
+  The guided flow (recommended day-to-day)
+    # Record -> review -> edit title -> confirm-gated publish (SSH-friendly)
+    $0 meeting
+    # Auto-stop after 1h and set the title up front
+    $0 meeting -d 3600 -t "Weekly sync"
+    # One-shot record -> transcribe -> summarize (no review/publish gates)
     $0 full
 
-    # Guided flow with review + confirm-gated publishing (SSH-friendly)
+  Participant roster (known names + roles, so the summary stops guessing)
+    # Default roster.txt in ROSTER_DIR is folded in automatically
     $0 meeting
+    # Pick a named roster for a recurring group (reads roster.acme.txt)
+    MEETING_ROSTER=acme $0 meeting
+    # Say who "You" (the mic track) is, overriding the '*' line in the roster
+    MEETING_SELF_NAME="Your Name" MEETING_SELF_ROLE="dev lead" $0 meeting
+    # (Set MEETING_ROSTER / MEETING_SELF_NAME once in .shepitnoterc to make them the default)
 
+  Language, models & jargon spelling
+    # Force Ukrainian and choose the summary model
+    $0 meeting -l uk -o qwen3:30b-a3b
+    # Bias transcription toward clean spellings of your tech terms
+    $0 meeting --hotwords "Kubernetes Postgres gRPC OAuth"
+
+  Who said what (speakers)
+    # Dual-track call: separate You (mic) + Remote (system) tracks
+    AUDIO_SOURCE_TYPE=dual $0 meeting
+    # Also split the far side into Remote 1 / Remote 2 / ... (needs HF_TOKEN + pyannote)
+    AUDIO_SOURCE_TYPE=dual DUAL_REMOTE_DIARIZATION=true $0 meeting
+    # Re-confirm/fix speaker names on an already-processed meeting (no re-transcribe)
+    $0 relabel 20260720_190326
+
+  Cloud mode (data leaves this machine — see docs/CLOUD.md)
+    # Summaries + transcription via the cloud for this run
+    $0 meeting --cloud
+    # Cloud transcription but keep the summary on the local model
+    $0 meeting --cloud --local-summary
+
+  Reprocess & catch up
+    # What still needs processing / publishing?
+    $0 status
+    # Process the most recent raw recording
+    $0 process-last
+    # Finish every unprocessed recording and run the publish hook
+    $0 catchup
     # Reprocess a whole meeting with different models (experiment freely; no publish)
     $0 process-meeting 20260720_190326 -m large-v3 -o qwen3:30b-a3b
 
+  Individual files
+    # Transcribe one audio file
+    $0 transcribe recordings/20251005/meeting_20251005_143022/meeting_20251005_143022.wav
     # List all recordings
     $0 list
 EOF
@@ -2535,7 +2567,11 @@ meeting_ui() {
                 echo "  --no-diarize          Skip diarization this run (overrides config)"
                 echo "  -s, --speakers NUM    Number of speakers (requires --diarize)"
                 echo ""
-                echo "AUDIO_SOURCE_TYPE (env) selects capture mode (microphone|monitor|both|dual)."
+                echo "Env (set inline or in .shepitnoterc):"
+                echo "  AUDIO_SOURCE_TYPE     Capture mode (microphone|monitor|both|dual)"
+                echo "  MEETING_ROSTER=NAME   Use roster.NAME.txt (known names+roles); default: roster.txt"
+                echo "  MEETING_SELF_NAME     Who the 'You' (mic) track is; MEETING_SELF_ROLE their role"
+                echo "  e.g.  MEETING_ROSTER=acme MEETING_SELF_NAME=\"Your Name\" $0 meeting"
                 return 0
                 ;;
             *) shift ;;
