@@ -77,6 +77,15 @@
 # Default: http://localhost:11434
 #OLLAMA_URL=http://localhost:11434
 
+# Language to write the SUMMARY in (independent of WHISPER_LANGUAGE, which is the
+# transcription language). Recommended: en, uk, ru, or a full language name.
+# Default: unset — the model picks the language on its own (usually English).
+# Set this when you want notes in the meeting's own language instead of English,
+# e.g. a Ukrainian-only meeting. Composes with SUMMARY_TRANSLATE: translate-first
+# can still run the transcript through English while the final summary comes back
+# out in this language. See docs/LANGUAGE.md for details.
+#SUMMARY_LANGUAGE=uk
+
 # --- Cloud mode (opt-in; OFF by default) -----------------------------------
 # Everything runs locally unless you turn cloud mode on for a run with
 # `./shepitnote --cloud ...` (or uncomment CLOUD=true to make it the default).

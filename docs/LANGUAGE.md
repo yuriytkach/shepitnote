@@ -8,6 +8,7 @@ spelled correctly.
 - [Whisper models](#whisper-models)
 - [Language selection (uk / ru / en)](#language-selection-uk--ru--en)
 - [English tech-term accuracy (hotwords + glossary)](#english-tech-term-accuracy-hotwords--glossary)
+- [Summary output language](#summary-output-language)
 
 ## Whisper models
 
@@ -262,3 +263,36 @@ than smoothing over them, which a direct multilingual summary sometimes does.
 Treat it as a per-meeting experiment, not a default. It runs two model passes
 (translate, then summarize), so expect roughly double the summarization time
 (~4 min with the MoE model on a ~13-minute meeting).
+
+## Summary output language
+
+By default the summary comes out in whatever language the model picks on its
+own — in practice usually English, regardless of the meeting's language. Set
+`--summary-lang` / `SUMMARY_LANGUAGE` to get notes in the meeting's own
+language instead (e.g. a Ukrainian-only meeting, Ukrainian notes):
+
+```bash
+./shepitnote meeting --summary-lang uk       # this run only
+python3 summarize.py transcript.txt --summary-lang uk   # worker flag
+```
+
+Set a permanent default in `.shepitnoterc`:
+
+```bash
+SUMMARY_LANGUAGE=uk       # or ru / en / any language name; unset = model's own choice
+```
+
+Recognized short codes `en`/`uk`/`ru` are expanded to a full name in the prompt
+(the model follows "Ukrainian" more reliably than a bare code); any other code
+or an already-spelled-out name (e.g. `pl`, `Polish`) is passed through as-is.
+
+This is **independent of `-l`/`WHISPER_LANGUAGE`** (the transcription language)
+and composes with translate-first: `--translate` can still run the transcript
+through English for a better summarization pass, while `--summary-lang`
+controls what language the *output* comes back in. On a real Ukrainian and a
+real Russian meeting with the recommended MoE model
+(`qwen3:30b-a3b-instruct-2507-q4_K_M`), the body content reliably came back in
+the requested language; the markdown section headings (`## Summary`,
+`## Discussion`, ...) were translated too on some runs but stayed in English on
+others — that part is best-effort and depends on the model's sampling, while
+the actual notes content is not.

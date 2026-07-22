@@ -164,6 +164,7 @@ Common options:
     --initial-prompt TEXT   Decoding-bias sentence for terminology
     --hotwords TERMS        Space-separated terms to bias transcription
     -o, --ollama MODEL      Ollama model for summarization
+    --summary-lang LANG     Language to write the summary in, e.g. en, uk, ru (default: English)
     --cloud                 Opt in to configured cloud processing
     --no-cloud              Force local processing for this run
     -f, --format FMT        txt, json, srt, vtt, or md

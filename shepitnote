@@ -37,6 +37,7 @@ MEETING_SELF_NAME="${MEETING_SELF_NAME:-}"           # Your name for the local m
 MEETING_SELF_ROLE="${MEETING_SELF_ROLE:-}"           # Your role/title (used with MEETING_SELF_NAME)
 OLLAMA_MODEL="${OLLAMA_MODEL:-llama3.1:8b}"
 OLLAMA_URL="${OLLAMA_URL:-http://localhost:11434}"
+SUMMARY_LANGUAGE="${SUMMARY_LANGUAGE:-}"             # Language to write the summary in, e.g. en/uk/ru (default: English, i.e. the model's own choice)
 
 # --- Cloud mode (opt-in; OFF by default) -------------------------------------
 # Everything runs locally unless cloud mode is turned on with `--cloud` (per run)
@@ -212,6 +213,9 @@ Options:
     --initial-prompt T  Decoding-bias sentence for tech-term spelling (overrides --hotwords)
     --hotwords TERMS    Space-separated tech terms to bias transcription spelling
     -o, --ollama MODEL  Ollama model for summarization (default: llama3.1:8b)
+    --summary-lang LANG Language to write the summary in, e.g. en, uk, ru (default:
+                        English; independent of -l/--language, which is the
+                        transcription language)
     --cloud             Process this run in the cloud: summaries via Ollama Cloud,
                         transcription via a cloud Whisper API (Groq by default).
                         Off by default; --no-cloud forces local. See docs/CLOUD.md.
@@ -259,6 +263,8 @@ Environment Variables:
                         your role. Alternative to a '*' line in roster.txt
     OLLAMA_MODEL        Default Ollama model (default: llama3.1:8b)
     OLLAMA_URL          Ollama API URL (default: http://localhost:11434)
+    SUMMARY_LANGUAGE    Default summary output language, e.g. en, uk, ru (default:
+                        English; same as --summary-lang)
     CLOUD               Set true to process in the cloud (same as --cloud); off by
                         default. Summaries use CLOUD_SUMMARY_MODEL; transcription
                         uses a cloud Whisper API when a key is set.
@@ -307,6 +313,9 @@ Examples:
     $0 meeting -l uk -o qwen3:30b-a3b
     # Bias transcription toward clean spellings of your tech terms
     $0 meeting --hotwords "Kubernetes Postgres gRPC OAuth"
+    # Write the summary itself in Ukrainian, regardless of transcription language
+    $0 meeting --summary-lang uk
+    # (Set SUMMARY_LANGUAGE=uk in .shepitnoterc to make it the default)
 
   Who said what (speakers)
     # Dual-track call: separate You (mic) + Remote (system) tracks
@@ -862,6 +871,7 @@ summarize_meeting() {
     local language=""
     local glossary_dir="$GLOSSARY_DIR"
     local roster_dir="$ROSTER_DIR"
+    local summary_lang="$SUMMARY_LANGUAGE"
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -883,6 +893,10 @@ summarize_meeting() {
                 ;;
             --roster-dir)
                 roster_dir="$2"
+                shift 2
+                ;;
+            --summary-lang)
+                summary_lang="$2"
                 shift 2
                 ;;
             --output)
@@ -924,6 +938,8 @@ summarize_meeting() {
     [ -n "$MEETING_ROSTER" ] && cmd="$cmd --roster $(printf %q "$MEETING_ROSTER")"
     [ -n "$MEETING_SELF_NAME" ] && cmd="$cmd --self-name $(printf %q "$MEETING_SELF_NAME")"
     [ -n "$MEETING_SELF_ROLE" ] && cmd="$cmd --self-role $(printf %q "$MEETING_SELF_ROLE")"
+    # Summary output language (default: unset, model picks English on its own).
+    [ -n "$summary_lang" ] && cmd="$cmd --summary-lang $(printf %q "$summary_lang")"
 
     eval $cmd
 
@@ -941,6 +957,7 @@ full_workflow() {
     local whisper_initial_prompt="$WHISPER_INITIAL_PROMPT"
     local whisper_hotwords="$WHISPER_HOTWORDS"
     local ollama_model="$OLLAMA_MODEL"
+    local summary_lang="$SUMMARY_LANGUAGE"
     local format=""
     local enable_diarization=false
     local num_speakers=""
@@ -976,6 +993,10 @@ full_workflow() {
                 ;;
             -o|--ollama)
                 ollama_model="$2"
+                shift 2
+                ;;
+            --summary-lang)
+                summary_lang="$2"
                 shift 2
                 ;;
             -f|--format)
@@ -1097,6 +1118,7 @@ full_workflow() {
         [ -n "$whisper_initial_prompt" ] && dual_args+=(--initial-prompt "$whisper_initial_prompt")
         [ -n "$whisper_hotwords" ] && dual_args+=(--hotwords "$whisper_hotwords")
         [ -n "$ollama_model" ] && dual_args+=(-o "$ollama_model")
+        [ -n "$summary_lang" ] && dual_args+=(--summary-lang "$summary_lang")
         [ "$enable_compression" = false ] && dual_args+=(--no-compress)
         [ "$keep_wav" = true ] && dual_args+=(--keep-wav)
         [ "$clean_all" = true ] && dual_args+=(--clean)
@@ -1199,6 +1221,7 @@ full_workflow() {
         local summarize_args=()
         [ -n "$ollama_model" ] && summarize_args+=(-o "$ollama_model")
         [ -n "$whisper_language" ] && summarize_args+=(-l "$whisper_language")
+        [ -n "$summary_lang" ] && summarize_args+=(--summary-lang "$summary_lang")
         summary_file=$(summarize_meeting "$transcription_file" "${summarize_args[@]}")
 
         if [ -z "$summary_file" ] || [ ! -f "$summary_file" ]; then
@@ -1312,6 +1335,7 @@ full_workflow() {
         local summarize_args=()
         [ -n "$ollama_model" ] && summarize_args+=(-o "$ollama_model")
         [ -n "$whisper_language" ] && summarize_args+=(-l "$whisper_language")
+        [ -n "$summary_lang" ] && summarize_args+=(--summary-lang "$summary_lang")
         summary_file=$(summarize_meeting "$transcription_file" "${summarize_args[@]}")
 
         if [ -z "$summary_file" ] || [ ! -f "$summary_file" ]; then
@@ -1379,6 +1403,7 @@ process_dual_meeting() {
     local initial_prompt="$WHISPER_INITIAL_PROMPT"
     local hotwords="$WHISPER_HOTWORDS"
     local ollama_model="$OLLAMA_MODEL"
+    local summary_lang="$SUMMARY_LANGUAGE"
     local enable_compression=true
     local keep_wav=false
     local clean_all=false
@@ -1403,6 +1428,10 @@ process_dual_meeting() {
                 ;;
             -o|--ollama)
                 ollama_model="$2"
+                shift 2
+                ;;
+            --summary-lang)
+                summary_lang="$2"
                 shift 2
                 ;;
             --no-compress)
@@ -1548,6 +1577,7 @@ process_dual_meeting() {
     local summarize_args=()
     [ -n "$ollama_model" ] && summarize_args+=(-o "$ollama_model")
     [ -n "$language" ] && summarize_args+=(-l "$language")
+    [ -n "$summary_lang" ] && summarize_args+=(--summary-lang "$summary_lang")
     summary_file=$(summarize_meeting "$transcription_file" "${summarize_args[@]}")
 
     if [ -z "$summary_file" ] || [ ! -f "$summary_file" ]; then
@@ -1620,6 +1650,7 @@ reprocess_meeting() {
     local initial_prompt="$WHISPER_INITIAL_PROMPT"
     local hotwords="$WHISPER_HOTWORDS"
     local ollama_model="$OLLAMA_MODEL"
+    local summary_lang="$SUMMARY_LANGUAGE"
 
     while [[ $# -gt 0 ]]; do
         case $1 in
@@ -1628,6 +1659,7 @@ reprocess_meeting() {
             --initial-prompt) initial_prompt="$2"; shift 2 ;;
             --hotwords)       hotwords="$2"; shift 2 ;;
             -o|--ollama)      ollama_model="$2"; shift 2 ;;
+            --summary-lang)   summary_lang="$2"; shift 2 ;;
             --publish)        do_publish=true; shift ;;
             -h|--help)        print_usage; return 0 ;;
             -*)               log_warn "Ignoring unsupported process-meeting option: $1"; shift ;;
@@ -1675,7 +1707,7 @@ reprocess_meeting() {
         export HUSHNOTE_SKIP_POST_SUMMARY_HOOK=1
         log_info "Reprocessing meeting: $(basename "$meeting_dir")  (publishing: off — pass --publish to enable)"
     fi
-    log_info "Whisper model: $model  |  Ollama model: $ollama_model${language:+  |  Language: $language}"
+    log_info "Whisper model: $model  |  Ollama model: $ollama_model${language:+  |  Language: $language}${summary_lang:+  |  Summary language: $summary_lang}"
     echo ""
 
     # Dual meeting? Both tracks present (as .wav or .mp3) -> full You/Remote reprocess.
@@ -1686,6 +1718,7 @@ reprocess_meeting() {
         [ -n "$initial_prompt" ] && dual_args+=(--initial-prompt "$initial_prompt")
         [ -n "$hotwords" ]       && dual_args+=(--hotwords "$hotwords")
         [ -n "$ollama_model" ]   && dual_args+=(-o "$ollama_model")
+        [ -n "$summary_lang" ]   && dual_args+=(--summary-lang "$summary_lang")
         local rc=0
         process_dual_meeting "$base" "${dual_args[@]}" || rc=$?
         return $rc
@@ -1738,6 +1771,7 @@ reprocess_meeting() {
     local summarize_args=()
     [ -n "$ollama_model" ] && summarize_args+=(-o "$ollama_model")
     [ -n "$language" ]     && summarize_args+=(-l "$language")
+    [ -n "$summary_lang" ] && summarize_args+=(--summary-lang "$summary_lang")
     local summary_file=""
     summary_file=$(summarize_meeting "$transcription_file" "${summarize_args[@]}") || {
         log_error "Summarization failed"
@@ -1881,19 +1915,21 @@ relabel_meeting() {
     # merge/drop, then re-applies the names and re-summarizes with the roster.
     # Re-runnable: keeps a one-time <file>.orig backup of the labels.
     local meeting_id="" do_guess=true ollama_model="$OLLAMA_MODEL" do_summary=true
+    local summary_lang="$SUMMARY_LANGUAGE"
     while [[ $# -gt 0 ]]; do
         case $1 in
-            --no-guess)   do_guess=false; shift ;;
-            -o|--ollama)  ollama_model="$2"; shift 2 ;;
-            --no-summary) do_summary=false; shift ;;
-            -h|--help)    print_usage; return 0 ;;
-            -*)           log_warn "Ignoring unsupported relabel option: $1"; shift ;;
-            *)            [ -z "$meeting_id" ] && meeting_id="$1"; shift ;;
+            --no-guess)     do_guess=false; shift ;;
+            -o|--ollama)    ollama_model="$2"; shift 2 ;;
+            --summary-lang) summary_lang="$2"; shift 2 ;;
+            --no-summary)   do_summary=false; shift ;;
+            -h|--help)      print_usage; return 0 ;;
+            -*)             log_warn "Ignoring unsupported relabel option: $1"; shift ;;
+            *)              [ -z "$meeting_id" ] && meeting_id="$1"; shift ;;
         esac
     done
 
     if [ -z "$meeting_id" ]; then
-        log_error "Usage: $(basename "$0") relabel <meeting-id> [--no-guess] [-o MODEL] [--no-summary]"
+        log_error "Usage: $(basename "$0") relabel <meeting-id> [--no-guess] [-o MODEL] [--summary-lang LANG] [--no-summary]"
         log_error "  meeting-id: folder name (meeting_YYYYMMDD_HHMMSS), bare timestamp,"
         log_error "  or a path to the meeting folder / a file in it."
         return 1
@@ -1954,7 +1990,9 @@ relabel_meeting() {
     if [ "$do_summary" = true ]; then
         echo ""
         log_info "Re-summarizing with the roster..."
-        summarize_meeting "${base}.txt" -o "$ollama_model" >/dev/null
+        local relabel_summarize_args=(-o "$ollama_model")
+        [ -n "$summary_lang" ] && relabel_summarize_args+=(--summary-lang "$summary_lang")
+        summarize_meeting "${base}.txt" "${relabel_summarize_args[@]}" >/dev/null
         log_success "Relabel complete. Updated: $(basename "${base}.txt"), $(basename "${base}_summary.md")"
     else
         log_success "Relabel complete. Updated: $(basename "${base}.txt") (summary unchanged)"
@@ -2597,6 +2635,7 @@ meeting_ui() {
             -m|--model)       process_opts+=(-m "$2"); shift 2 ;;
             -l|--language)    process_opts+=(-l "$2"); shift 2 ;;
             -o|--ollama)      process_opts+=(-o "$2"); shift 2 ;;
+            --summary-lang)   process_opts+=(--summary-lang "$2"); shift 2 ;;
             --initial-prompt) process_opts+=(--initial-prompt "$2"); shift 2 ;;
             --hotwords)       process_opts+=(--hotwords "$2"); shift 2 ;;
             --diarize)        process_opts+=(--diarize); shift ;;
@@ -2614,6 +2653,7 @@ meeting_ui() {
                 echo "  -m, --model MODEL     Whisper model (tiny|base|small|medium|large-v3)"
                 echo "  -l, --language LANG   Language code (uk|ru|en|auto, default: auto-detect)"
                 echo "  -o, --ollama MODEL    Ollama model for summarization (default: ${OLLAMA_MODEL})"
+                echo "  --summary-lang LANG   Language to write the summary in, e.g. en, uk, ru (default: English)"
                 echo "  --cloud               Summarize/transcribe via the cloud this run (off by default)"
                 echo "  --initial-prompt TEXT Decoding-bias sentence (overrides --hotwords)"
                 echo "  --hotwords TERMS      Space-separated tech terms to bias transcription"
@@ -2625,6 +2665,7 @@ meeting_ui() {
                 echo "  AUDIO_SOURCE_TYPE     Capture mode (microphone|monitor|both|dual)"
                 echo "  MEETING_ROSTER=NAME   Use roster.NAME.txt (known names+roles); default: roster.txt"
                 echo "  MEETING_SELF_NAME     Who the 'You' (mic) track is; MEETING_SELF_ROLE their role"
+                echo "  SUMMARY_LANGUAGE      Default summary language, e.g. uk/ru/en (default: English)"
                 echo "  e.g.  MEETING_ROSTER=acme MEETING_SELF_NAME=\"Your Name\" $0 meeting"
                 return 0
                 ;;
@@ -3063,6 +3104,7 @@ main() {
                 echo "  --initial-prompt TEXT Decoding-bias sentence for tech-term spelling (overrides --hotwords)"
                 echo "  --hotwords TERMS      Space-separated tech terms to bias transcription spelling"
                 echo "  -o, --ollama MODEL    Ollama model for summarization"
+                echo "  --summary-lang LANG   Language to write the summary in, e.g. en, uk, ru (default: English)"
                 echo "  -s, --speakers NUM    Number of speakers (requires --diarize)"
                 echo "  --diarize             Enable speaker diarization"
                 echo "  --timeout SECS        Kill processing after SECS seconds (default: ${PROCESS_TIMEOUT})"
@@ -3090,6 +3132,7 @@ main() {
             local whisper_initial_prompt="$WHISPER_INITIAL_PROMPT"
             local whisper_hotwords="$WHISPER_HOTWORDS"
             local ollama_model="$OLLAMA_MODEL"
+            local summary_lang="$SUMMARY_LANGUAGE"
             local enable_diarization=false
             local num_speakers=""
             local enable_compression=true
@@ -3120,6 +3163,10 @@ main() {
                         ;;
                     -o|--ollama)
                         ollama_model="$2"
+                        shift 2
+                        ;;
+                    --summary-lang)
+                        summary_lang="$2"
                         shift 2
                         ;;
                     --diarize)
@@ -3186,6 +3233,7 @@ main() {
                 [ -n "$whisper_initial_prompt" ] && dual_args+=(--initial-prompt "$whisper_initial_prompt")
                 [ -n "$whisper_hotwords" ] && dual_args+=(--hotwords "$whisper_hotwords")
                 [ -n "$ollama_model" ] && dual_args+=(-o "$ollama_model")
+                [ -n "$summary_lang" ] && dual_args+=(--summary-lang "$summary_lang")
                 [ "$enable_compression" = false ] && dual_args+=(--no-compress)
                 [ "$keep_wav" = true ] && dual_args+=(--keep-wav)
                 [ "$clean_all" = true ] && dual_args+=(--clean)
@@ -3282,6 +3330,7 @@ main() {
                 local summarize_args=()
                 [ -n "$ollama_model" ] && summarize_args+=(-o "$ollama_model")
                 [ -n "$whisper_language" ] && summarize_args+=(-l "$whisper_language")
+                [ -n "$summary_lang" ] && summarize_args+=(--summary-lang "$summary_lang")
                 summary_file=$(summarize_meeting "$transcription_file" "${summarize_args[@]}")
 
                 if [ -z "$summary_file" ] || [ ! -f "$summary_file" ]; then
@@ -3389,6 +3438,7 @@ main() {
                     local summarize_args=()
                     [ -n "$ollama_model" ] && summarize_args+=(-o "$ollama_model")
                     [ -n "$whisper_language" ] && summarize_args+=(-l "$whisper_language")
+                    [ -n "$summary_lang" ] && summarize_args+=(--summary-lang "$summary_lang")
                     summary_file=$(summarize_meeting "$transcription_file" "${summarize_args[@]}")
                     step_done
 

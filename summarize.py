@@ -24,8 +24,17 @@ except ImportError:
 
 DEFAULT_OLLAMA_URL = "http://localhost:11434"
 
-SUMMARY_PROMPT = """You are an assistant that writes concise meeting notes from transcripts.
+# Codes recognized by this project's -l/WHISPER_LANGUAGE convention (uk/ru/en)
+# get a full name in the prompt, since an LLM follows "Ukrainian" more
+# reliably than a bare code. Any other code/name is passed through as-is.
+SUMMARY_LANGUAGE_NAMES = {
+    "en": "English",
+    "uk": "Ukrainian",
+    "ru": "Russian",
+}
 
+SUMMARY_PROMPT = """You are an assistant that writes concise meeting notes from transcripts.
+{language_instruction}
 Produce the following sections using markdown headings:
 
 ## Summary
@@ -119,11 +128,31 @@ def load_transcription(file_path: str) -> str:
         return path.read_text()
 
 
-def _build_summary_prompt(transcription: str, known_terms=None, roster_block="") -> str:
+def resolve_summary_language(explicit) -> str | None:
+    """Resolve the summary's output language to a human-readable name for the
+    prompt (e.g. "Ukrainian"), or None when no language was requested.
+
+    None/empty/"auto" (any case) all mean "no explicit language" — same
+    collapsing rule as WHISPER_LANGUAGE/-l elsewhere (glossary.normalize_language)
+    — and reproduce today's default behavior byte-for-byte (no instruction added,
+    so the model picks the language on its own as before). A recognized code
+    (en/uk/ru) maps to its full name; any other code or already-spelled-out name
+    (e.g. "pl", "Polish") passes through unchanged.
+    """
+    normalized = glossary.normalize_language(explicit)
+    if not normalized:
+        return None
+    return SUMMARY_LANGUAGE_NAMES.get(normalized, explicit.strip())
+
+
+def _build_summary_prompt(transcription: str, known_terms=None, roster_block="",
+                           summary_language=None) -> str:
     """Format SUMMARY_PROMPT, optionally folding in glossary terms (soft LLM
-    normalization) and a roster of known participants. When known_terms is
-    empty/None the {normalization} slot is empty and when roster_block is empty
-    the {roster} slot is empty, reproducing the earlier prompt byte-for-byte."""
+    normalization), a roster of known participants, and a target output
+    language. When known_terms is empty/None the {normalization} slot is empty,
+    when roster_block is empty the {roster} slot is empty, and when
+    summary_language is None the {language_instruction} slot is empty,
+    reproducing the earlier prompt byte-for-byte."""
     if known_terms:
         normalization = (
             "The transcript may render some technical or product names "
@@ -133,10 +162,23 @@ def _build_summary_prompt(transcription: str, known_terms=None, roster_block="")
         )
     else:
         normalization = ""
+    if summary_language:
+        language_instruction = (
+            f"Write your ENTIRE response in {summary_language}, including the "
+            f"section headings themselves — even though the heading names below "
+            f"(\"Summary\", \"Discussion\", \"Decisions\", \"Action Items\", "
+            f"\"Participants\") are given in English, translate each one into "
+            f"{summary_language} in your output; do not leave any heading in "
+            "English. Keep [Speaker] labels, proper nouns, and technical/product "
+            "terms as they appear in the transcript; do not translate names."
+        )
+    else:
+        language_instruction = ""
     return SUMMARY_PROMPT.format(
         transcription=transcription,
         normalization=normalization,
         roster=roster_block or "",
+        language_instruction=language_instruction,
     )
 
 
@@ -146,6 +188,7 @@ def summarize_meeting(
     ollama_url: str,
     known_terms=None,
     roster_block="",
+    summary_language=None,
 ) -> dict:
     """Generate meeting notes from a transcription in a single Ollama call.
 
@@ -153,12 +196,14 @@ def summarize_meeting(
     instruction to normalize phonetic renderings toward those terms is folded into
     the prompt.
     roster_block: optional pre-built roster ground-truth block (from roster.py).
-    When both are empty/None, the prompt and behavior are unchanged from before.
+    summary_language: optional human-readable language name (from
+    resolve_summary_language) the summary should be written in.
+    When all are empty/None, the prompt and behavior are unchanged from before.
     """
     print(f"Generating meeting summary using {model}...", file=sys.stderr)
 
     text = query_ollama(
-        _build_summary_prompt(transcription, known_terms, roster_block),
+        _build_summary_prompt(transcription, known_terms, roster_block, summary_language),
         model=model,
         ollama_url=ollama_url,
     )
@@ -251,6 +296,9 @@ def main():
                        help="Translate the transcript to English before "
                             "summarizing (better notes for non-English meetings). "
                             "Default: off / SUMMARY_TRANSLATE env")
+    parser.add_argument("--summary-lang", dest="summary_lang", default=None,
+                       help="Language to write the summary in, e.g. en, uk, ru, "
+                            "or a full name (default: English / SUMMARY_LANGUAGE env)")
     parser.add_argument("--translate-model", default=None,
                        help="Model for the translate step (default: same as -m, "
                             "or SUMMARY_TRANSLATE_MODEL env)")
@@ -266,6 +314,14 @@ def main():
 
     translate = args.translate if args.translate is not None else _env_bool("SUMMARY_TRANSLATE")
     translate_model = args.translate_model or os.getenv("SUMMARY_TRANSLATE_MODEL") or args.model
+
+    # Resolve the summary's output language: CLI flag > SUMMARY_LANGUAGE env >
+    # unset (model picks the language on its own, same as before this option
+    # existed).
+    summary_lang_raw = args.summary_lang or os.getenv("SUMMARY_LANGUAGE")
+    summary_language = resolve_summary_language(summary_lang_raw)
+    if summary_language:
+        print(f"Summary language: {summary_language}", file=sys.stderr)
 
     # Heads-up when a cloud model is in play: the transcript leaves the machine.
     # shepitnote prints a fuller cloud banner, but this covers direct calls too.
@@ -337,6 +393,7 @@ def main():
             ollama_url=args.ollama_url,
             known_terms=known_terms,
             roster_block=roster_block,
+            summary_language=summary_language,
         )
 
         # Save results
