@@ -160,6 +160,10 @@ ShepitNote wraps PipeWire's WebRTC echo canceller behind a simple toggle:
   adapt.
 - **Also cleans your mic for Zoom/Meet/Slack**, since it switches your default
   input to the cancelled mic.
+- **Speaker volume stays continuous:** enabling AEC transfers the current
+  speaker level to its virtual output and sets the physical speaker to unity
+  gain. Your normal volume keys then control the virtual output; turning AEC
+  off transfers its current level back to the physical speaker.
 - **Double-talk is fine:** Remote is captured separately from the system audio
   (never touched by AEC) and the canceller preserves your voice, so both sides
   land on their own track.

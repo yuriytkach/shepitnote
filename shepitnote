@@ -485,6 +485,31 @@ aec_is_loaded() {
         | grep -q "module-echo-cancel.*${AEC_SOURCE_NAME}"
 }
 
+# Print a sink's per-channel PulseAudio volume values.  Raw values, rather
+# than rounded percentages, preserve balance when moving the volume between
+# the physical sink and the AEC virtual sink.
+_aec_sink_volume() {
+    pactl get-sink-volume "$1" 2>/dev/null | awk '
+        /^Volume:/ {
+            for (i = 1; i < NF; i++) {
+                if ($(i + 1) == "/" && $i ~ /^[0-9]+$/) {
+                    printf "%s%s", separator, $i
+                    separator = " "
+                }
+            }
+            exit
+        }
+    '
+}
+
+_aec_set_sink_volume() {
+    local sink="$1" volume="$2"
+    local -a channel_volumes
+    read -r -a channel_volumes <<< "$volume"
+    [ ${#channel_volumes[@]} -gt 0 ] || return 1
+    pactl set-sink-volume "$sink" "${channel_volumes[@]}"
+}
+
 # Move existing playback streams onto the echo-cancel sink, so turning AEC on
 # mid-call also routes the ongoing call through the canceller (streams do not
 # follow a default change on their own). Playback only — we deliberately do NOT
@@ -509,7 +534,7 @@ aec_on() {
         log_warn "Echo cancellation already appears active. Use 'aec status' or 'aec off'."
         return 0
     fi
-    local src sink
+    local src sink sink_volume
     src=$(pactl get-default-source 2>/dev/null)
     sink=$(pactl get-default-sink 2>/dev/null)
     case "$src" in *echocancel*)
@@ -519,6 +544,9 @@ aec_on() {
     if [ -z "$src" ] || [ -z "$sink" ]; then
         log_error "Could not read default source/sink from pactl."; return 1
     fi
+    sink_volume=$(_aec_sink_volume "$sink")
+    [ -n "$sink_volume" ] \
+        || log_warn "Could not read speaker volume; AEC will use unity gain"
     log_info "Loading WebRTC echo canceller..."
     log_info "  mic (master):     $src"
     log_info "  speaker (master): $sink"
@@ -539,14 +567,26 @@ aec_on() {
     until pactl list short sources 2>/dev/null | grep -q "$AEC_SOURCE_NAME"; do
         tries=$((tries + 1)); [ "$tries" -ge 50 ] && break
     done
+    # The virtual sink has independent persisted volume.  Transfer the current
+    # speaker volume to it, then put the physical master at unity gain.  This
+    # preserves loudness at enable time and makes desktop volume keys adjust
+    # the virtual sink only while AEC is active.
+    if [ -n "$sink_volume" ] \
+       && _aec_set_sink_volume "$AEC_SINK_NAME" "$sink_volume" 2>/dev/null; then
+        pactl set-sink-volume "$sink" 100% 2>/dev/null \
+            || log_warn "Could not normalize physical speaker volume"
+    else
+        pactl set-sink-volume "$AEC_SINK_NAME" 100% 2>/dev/null \
+            || log_warn "Could not initialize echo-cancel speaker volume"
+    fi
     pactl set-default-source "$AEC_SOURCE_NAME" 2>/dev/null \
         || log_warn "Could not set default source to $AEC_SOURCE_NAME"
     pactl set-default-sink "$AEC_SINK_NAME" 2>/dev/null \
         || log_warn "Could not set default sink to $AEC_SINK_NAME"
     # Pull already-playing audio through the canceller too (mid-call enable).
     _aec_move_playback_streams
-    printf 'MODULE_ID=%s\nORIG_SOURCE=%s\nORIG_SINK=%s\n' \
-        "$modid" "$src" "$sink" > "$AEC_STATE_FILE"
+    printf "MODULE_ID=%s\nORIG_SOURCE=%s\nORIG_SINK=%s\nORIG_SINK_VOLUME='%s'\n" \
+        "$modid" "$src" "$sink" "$sink_volume" > "$AEC_STATE_FILE"
     log_success "Echo cancellation ON (module $modid). Your mic is now echo-cancelled."
     log_info "Test it: AUDIO_SOURCE_TYPE=dual ./shepitnote meeting"
     log_info "Turn off: ./shepitnote aec off   (also reverts on reboot)"
@@ -562,16 +602,30 @@ aec_off() {
        || pactl get-default-source 2>/dev/null | grep -q echocancel; then
         was_active=true
     fi
-    local modid="" orig_source="" orig_sink=""
+    local modid="" orig_source="" orig_sink="" orig_sink_volume="" aec_sink_volume=""
     if [ -f "$AEC_STATE_FILE" ]; then
-        # State file holds only MODULE_ID/ORIG_SOURCE/ORIG_SINK assignments.
+        # State file holds only module/device/volume assignments.
         # shellcheck disable=SC1090
         . "$AEC_STATE_FILE"
         modid="${MODULE_ID:-}"; orig_source="${ORIG_SOURCE:-}"; orig_sink="${ORIG_SINK:-}"
+        orig_sink_volume="${ORIG_SINK_VOLUME:-}"
+        # Only transfer back when this AEC session used the volume handoff.
+        # Older state files have no saved volume, so their physical sink has
+        # remained untouched and must not be overwritten.
+        [ -n "$orig_sink_volume" ] && aec_sink_volume=$(_aec_sink_volume "$AEC_SINK_NAME")
     fi
     # Restore defaults first so nothing points at a device we're about to remove.
     [ -n "$orig_source" ] && pactl set-default-source "$orig_source" 2>/dev/null
     [ -n "$orig_sink" ]   && pactl set-default-sink   "$orig_sink"   2>/dev/null
+    if [ -n "$orig_sink" ]; then
+        if [ -n "$aec_sink_volume" ]; then
+            _aec_set_sink_volume "$orig_sink" "$aec_sink_volume" 2>/dev/null \
+                || log_warn "Could not restore current speaker volume"
+        elif [ -n "$orig_sink_volume" ]; then
+            _aec_set_sink_volume "$orig_sink" "$orig_sink_volume" 2>/dev/null \
+                || log_warn "Could not restore original speaker volume"
+        fi
+    fi
     [ -n "$modid" ] && pactl unload-module "$modid" 2>/dev/null
     # Safety net: unload any echo-cancel module we own that is still loaded.
     local id
