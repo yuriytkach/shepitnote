@@ -8,7 +8,10 @@ Identifies who spoke when in an audio file
 import argparse
 import json
 import os
+import shutil
+import subprocess
 import sys
+import tempfile
 from pathlib import Path
 from datetime import datetime, timezone
 
@@ -27,6 +30,42 @@ except ImportError:
 DEFAULT_PIPELINE = os.environ.get(
     "PYANNOTE_PIPELINE", "pyannote/speaker-diarization-community-1"
 )
+
+
+def _prepare_wav_for_diarization(audio_file):
+    """Transcode non-WAV input (e.g. a reprocess falling back to the compressed
+    MP3) to a temporary WAV before handing it to the pyannote pipeline.
+
+    pyannote crops exact fixed-size sample windows straight from the file. MP3
+    isn't sample-accurate: a LAME-encoded file carries an encoder delay/padding
+    (per the Xing/LAME gapless header) that ffmpeg's decoder strips, so the
+    first "exact 10s" window can decode a few hundred samples short and
+    pyannote raises instead of tolerating it. WAV is sample-accurate PCM and
+    doesn't hit this. Returns (path, is_temp).
+    """
+    if str(audio_file).lower().endswith(".wav"):
+        return audio_file, False
+
+    ffmpeg = shutil.which("ffmpeg")
+    if not ffmpeg:
+        return audio_file, False
+
+    fd, tmp_path = tempfile.mkstemp(suffix=".wav")
+    os.close(fd)
+    cmd = [ffmpeg, "-y", "-i", str(audio_file),
+           "-ac", "1", "-ar", "16000", tmp_path]
+    try:
+        subprocess.run(cmd, check=True,
+                       stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        if os.path.getsize(tmp_path) > 0:
+            return tmp_path, True
+    except (subprocess.CalledProcessError, OSError):
+        pass
+    try:
+        os.unlink(tmp_path)
+    except OSError:
+        pass
+    return audio_file, False
 
 
 def diarize_audio(
@@ -73,8 +112,20 @@ def diarize_audio(
     if max_speakers is not None:
         params["max_speakers"] = max_speakers
 
-    # Run diarization
-    diarization_output = pipeline(audio_file, **params)
+    # Run diarization. pyannote crops sample-exact windows, which MP3 can't
+    # satisfy reliably (see _prepare_wav_for_diarization) — transcode to WAV
+    # first when needed.
+    diar_input, is_temp = _prepare_wav_for_diarization(audio_file)
+    if is_temp:
+        print("Transcoding to WAV for sample-accurate diarization...", file=sys.stderr)
+    try:
+        diarization_output = pipeline(diar_input, **params)
+    finally:
+        if is_temp:
+            try:
+                os.unlink(diar_input)
+            except OSError:
+                pass
 
     # Process results
     segments = []
