@@ -45,7 +45,7 @@ List ONLY the people who actually spoke in this meeting — those who appear as 
 - Each distinct speaker label is exactly one person; never list the same person twice under different names.
 - Do NOT list anyone who is only mentioned or talked about by others but did not themselves speak.
 - Do NOT invent a job title or role you cannot support from the transcript; if unsure of someone's role, give the name alone.
-- Write each participant as their name and role only (e.g. "Viktor — frontend developer"); do NOT repeat any alias/nickname list.
+- Format each line as exactly `- Name — role` (or just `- Name` with no role). Never append aliases, nicknames, or parenthetical notes such as "(aka ...)" — any alias list given below is only for matching speakers to their canonical name, not something to reproduce in your output.
 {roster}{normalization}
 Transcription:
 {transcription}
