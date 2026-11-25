@@ -181,6 +181,8 @@ print_usage() {
     cat << EOF
 Usage: $0 [COMMAND] [OPTIONS]
 
+Just want to start a meeting? See "Quick start" at the very bottom.
+
 Commands:
     record              Start recording a meeting
     transcribe FILE     Transcribe an audio file
@@ -346,6 +348,21 @@ Examples:
     $0 transcribe recordings/20251005/meeting_20251005_143022/meeting_20251005_143022.wav
     # List all recordings
     $0 list
+
+Quick start — copy, paste, go (a call with you + others):
+    # Local, language auto-detected (each track — You / Remote — picks its own)
+    AUDIO_SOURCE_TYPE=dual $0 meeting
+    # Cloud (faster; audio + text leave this machine)
+    AUDIO_SOURCE_TYPE=dual $0 meeting --cloud
+    # Force one language (Whisper takes ONE per track; for a uk+ru mix leave -l out)
+    AUDIO_SOURCE_TYPE=dual $0 meeting -l uk
+    # With a named roster (roster.acme.txt) — or MEETING_ROSTER=none for no roster
+    AUDIO_SOURCE_TYPE=dual MEETING_ROSTER=acme $0 meeting --cloud
+    # Everything: split remote speakers + roster + Ukrainian summary + cloud
+    AUDIO_SOURCE_TYPE=dual DUAL_REMOTE_DIARIZATION=true MEETING_ROSTER=acme $0 meeting --summary-lang uk --cloud
+
+    Tip: save a line you like as a tiny script per meeting type, e.g.
+      echo 'cd $SCRIPT_DIR && AUDIO_SOURCE_TYPE=dual MEETING_ROSTER=acme ./shepitnote meeting --cloud' > ~/bin/standup && chmod +x ~/bin/standup
 EOF
 }
 
